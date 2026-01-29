@@ -1,0 +1,4604 @@
+{
+  "threads": [
+    {
+      "pid": 485985,
+      "tid": 485985,
+      "levels": [
+        {
+          "level": 4,
+          "groups": [
+            [
+              {
+                "id": 194,
+                "name": "DLIOBenchmark.initialize",
+                "cat": "dlio_benchmark",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458666862,
+                "dur": 81302,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 193,
+                  "level": 4
+                }
+              },
+              {
+                "id": 11,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458666998,
+                "dur": 8,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "level": 4
+                }
+              },
+              {
+                "id": 13,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458667049,
+                "dur": 3727,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "fhash": "0b5bb03819c39ad5",
+                  "level": 4
+                }
+              },
+              {
+                "id": 15,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458671214,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "level": 4
+                }
+              },
+              {
+                "id": 17,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458671245,
+                "dur": 924,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 18,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458672186,
+                "dur": 53,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 188,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458681367,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "level": 4
+                }
+              },
+              {
+                "id": 190,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458681397,
+                "dur": 911,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "fhash": "229811311ca14071",
+                  "level": 4
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 5,
+          "groups": [
+            [
+              {
+                "id": 207,
+                "name": "ai_root",
+                "cat": "ai_root",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458748183,
+                "dur": 10180265,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 5,
+                  "epoch": 2,
+                  "p_idx": 203,
+                  "step": 3
+                }
+              },
+              {
+                "id": 204,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458748315,
+                "dur": 1204,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 203,
+                  "level": 5
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 6,
+          "groups": [
+            [
+              {
+                "id": 244,
+                "name": "epoch.block",
+                "cat": "pipeline",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458803048,
+                "dur": 10117737,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 207,
+                  "step": 3,
+                  "count": 1,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 216,
+                "name": "train",
+                "cat": "pipeline",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458803399,
+                "dur": 10108509,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "epoch": 2,
+                  "p_idx": 207,
+                  "step": 3
+                }
+              },
+              {
+                "id": 239,
+                "name": "TorchFramework.get_loader",
+                "cat": "ai_framework",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630468920004,
+                "dur": 10,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 207,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 240,
+                "name": "TorchDataLoader.finalize",
+                "cat": "data_loader",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630468920067,
+                "dur": 4,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 207,
+                  "step": 3,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 241,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630468920132,
+                "dur": 619,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 207,
+                  "level": 6
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 7,
+          "groups": [
+            [
+              {
+                "id": 229,
+                "name": "fetch.iter",
+                "cat": "dataloader",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458803649,
+                "dur": 8107812,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 216,
+                  "step": 1
+                }
+              },
+              {
+                "id": 219,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458858247,
+                "dur": 12023,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 216,
+                  "ret": 486089,
+                  "level": 7
+                }
+              },
+              {
+                "id": 220,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458922201,
+                "dur": 14381,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 216,
+                  "ret": 486098,
+                  "level": 7
+                }
+              },
+              {
+                "id": 221,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630458983448,
+                "dur": 14024,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 216,
+                  "ret": 486106,
+                  "level": 7
+                }
+              },
+              {
+                "id": 222,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630459041340,
+                "dur": 14169,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 216,
+                  "ret": 486114,
+                  "level": 7
+                }
+              },
+              {
+                "id": 223,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630459093094,
+                "dur": 14694,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 216,
+                  "ret": 486161,
+                  "level": 7
+                }
+              },
+              {
+                "id": 224,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630459109119,
+                "dur": 14867,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 216,
+                  "ret": 486168,
+                  "level": 7
+                }
+              },
+              {
+                "id": 225,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630459125135,
+                "dur": 25640,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 216,
+                  "ret": 486177,
+                  "level": 7
+                }
+              },
+              {
+                "id": 226,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630459160481,
+                "dur": 54283,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 216,
+                  "ret": 486186,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 230,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630466911479,
+                "dur": 712167,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 216,
+                  "step": 1
+                }
+              },
+              {
+                "id": 227,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630466911945,
+                "dur": 22,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 216,
+                  "step": 1,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 228,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630466912028,
+                "dur": 636720,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 216,
+                  "step": 1,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 234,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630467624893,
+                "dur": 641085,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 2,
+                  "p_idx": 216,
+                  "step": 2
+                }
+              },
+              {
+                "id": 231,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630467628895,
+                "dur": 7,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 216,
+                  "step": 2,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 232,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630467628931,
+                "dur": 636560,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 216,
+                  "step": 2,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 238,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630468266755,
+                "dur": 641071,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 3,
+                  "p_idx": 216,
+                  "step": 3
+                }
+              },
+              {
+                "id": 235,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630468270778,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 216,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 236,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485985,
+                "tid": 485985,
+                "ts": 1760630468270810,
+                "dur": 636610,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 216,
+                  "step": 3,
+                  "level": 7
+                }
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "pid": 485988,
+      "tid": 485988,
+      "levels": [
+        {
+          "level": 4,
+          "groups": [
+            [
+              {
+                "id": 194,
+                "name": "DLIOBenchmark.initialize",
+                "cat": "dlio_benchmark",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458524629,
+                "dur": 223534,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 193,
+                  "level": 4
+                }
+              },
+              {
+                "id": 11,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458667002,
+                "dur": 7,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "level": 4
+                }
+              },
+              {
+                "id": 13,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458667054,
+                "dur": 3729,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "fhash": "0b5bb03819c39ad5",
+                  "level": 4
+                }
+              },
+              {
+                "id": 15,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458671210,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "level": 4
+                }
+              },
+              {
+                "id": 17,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458671243,
+                "dur": 907,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 18,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458672165,
+                "dur": 61,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 188,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458681266,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "level": 4
+                }
+              },
+              {
+                "id": 190,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458681297,
+                "dur": 1030,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "fhash": "229811311ca14071",
+                  "level": 4
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 5,
+          "groups": [
+            [
+              {
+                "id": 206,
+                "name": "ai_root",
+                "cat": "ai_root",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458748182,
+                "dur": 10180120,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 5,
+                  "epoch": 2,
+                  "p_idx": 202,
+                  "step": 3
+                }
+              },
+              {
+                "id": 203,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458748230,
+                "dur": 1273,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 202,
+                  "level": 5
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 6,
+          "groups": [
+            [
+              {
+                "id": 243,
+                "name": "epoch.block",
+                "cat": "pipeline",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458803026,
+                "dur": 10117755,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "count": 1,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 215,
+                "name": "train",
+                "cat": "pipeline",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458803223,
+                "dur": 10108680,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "epoch": 2,
+                  "p_idx": 206,
+                  "step": 3
+                }
+              },
+              {
+                "id": 238,
+                "name": "TorchFramework.get_loader",
+                "cat": "ai_framework",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630468919580,
+                "dur": 9,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 239,
+                "name": "TorchDataLoader.finalize",
+                "cat": "data_loader",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630468919642,
+                "dur": 4,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 240,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630468919707,
+                "dur": 1029,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 206,
+                  "level": 6
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 7,
+          "groups": [
+            [
+              {
+                "id": 228,
+                "name": "fetch.iter",
+                "cat": "dataloader",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458803396,
+                "dur": 8119182,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 218,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458858382,
+                "dur": 16405,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486095,
+                  "level": 7
+                }
+              },
+              {
+                "id": 219,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458929075,
+                "dur": 14151,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486102,
+                  "level": 7
+                }
+              },
+              {
+                "id": 220,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630458996442,
+                "dur": 13529,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486111,
+                  "level": 7
+                }
+              },
+              {
+                "id": 221,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630459061442,
+                "dur": 13936,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486129,
+                  "level": 7
+                }
+              },
+              {
+                "id": 222,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630459106382,
+                "dur": 12935,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486165,
+                  "level": 7
+                }
+              },
+              {
+                "id": 223,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630459120553,
+                "dur": 14066,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486173,
+                  "level": 7
+                }
+              },
+              {
+                "id": 224,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630459136188,
+                "dur": 45321,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486183,
+                  "level": 7
+                }
+              },
+              {
+                "id": 225,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630459201770,
+                "dur": 44041,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486192,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 229,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630466922593,
+                "dur": 701029,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 226,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630466923087,
+                "dur": 16,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 1,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 227,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630466923155,
+                "dur": 636633,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 1,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 233,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630467623853,
+                "dur": 642126,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 2,
+                  "p_idx": 215,
+                  "step": 2
+                }
+              },
+              {
+                "id": 230,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630467627872,
+                "dur": 7,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 2,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 231,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630467627912,
+                "dur": 636553,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 2,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 237,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630468267061,
+                "dur": 640775,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 3,
+                  "p_idx": 215,
+                  "step": 3
+                }
+              },
+              {
+                "id": 234,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630468271110,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 235,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485988,
+                "tid": 485988,
+                "ts": 1760630468271143,
+                "dur": 636617,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 3,
+                  "level": 7
+                }
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "pid": 485989,
+      "tid": 485989,
+      "levels": [
+        {
+          "level": 4,
+          "groups": [
+            [
+              {
+                "id": 194,
+                "name": "DLIOBenchmark.initialize",
+                "cat": "dlio_benchmark",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458524630,
+                "dur": 223535,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 193,
+                  "level": 4
+                }
+              },
+              {
+                "id": 11,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458667000,
+                "dur": 9,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "level": 4
+                }
+              },
+              {
+                "id": 13,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458667053,
+                "dur": 3131,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "fhash": "0b5bb03819c39ad5",
+                  "level": 4
+                }
+              },
+              {
+                "id": 15,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458671449,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "level": 4
+                }
+              },
+              {
+                "id": 17,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458671481,
+                "dur": 693,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 18,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458672191,
+                "dur": 54,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 188,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458681105,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "level": 4
+                }
+              },
+              {
+                "id": 190,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458681135,
+                "dur": 689,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "fhash": "229811311ca14071",
+                  "level": 4
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 5,
+          "groups": [
+            [
+              {
+                "id": 206,
+                "name": "ai_root",
+                "cat": "ai_root",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458748184,
+                "dur": 10180102,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 5,
+                  "epoch": 2,
+                  "p_idx": 202,
+                  "step": 3
+                }
+              },
+              {
+                "id": 203,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458748232,
+                "dur": 1271,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 202,
+                  "level": 5
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 6,
+          "groups": [
+            [
+              {
+                "id": 243,
+                "name": "epoch.block",
+                "cat": "pipeline",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458803004,
+                "dur": 10117771,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "count": 1,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 215,
+                "name": "train",
+                "cat": "pipeline",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458803206,
+                "dur": 10108657,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "epoch": 2,
+                  "p_idx": 206,
+                  "step": 3
+                }
+              },
+              {
+                "id": 238,
+                "name": "TorchFramework.get_loader",
+                "cat": "ai_framework",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630468919575,
+                "dur": 9,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 239,
+                "name": "TorchDataLoader.finalize",
+                "cat": "data_loader",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630468919635,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 240,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630468919699,
+                "dur": 1038,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 206,
+                  "level": 6
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 7,
+          "groups": [
+            [
+              {
+                "id": 228,
+                "name": "fetch.iter",
+                "cat": "dataloader",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458803376,
+                "dur": 8182856,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 218,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458858354,
+                "dur": 15140,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486092,
+                  "level": 7
+                }
+              },
+              {
+                "id": 219,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458928679,
+                "dur": 13858,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486100,
+                  "level": 7
+                }
+              },
+              {
+                "id": 220,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630458994552,
+                "dur": 13550,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486108,
+                  "level": 7
+                }
+              },
+              {
+                "id": 221,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630459059697,
+                "dur": 14081,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486126,
+                  "level": 7
+                }
+              },
+              {
+                "id": 222,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630459114035,
+                "dur": 14248,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486171,
+                  "level": 7
+                }
+              },
+              {
+                "id": 223,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630459129545,
+                "dur": 14199,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486176,
+                  "level": 7
+                }
+              },
+              {
+                "id": 224,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630459145526,
+                "dur": 44728,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486184,
+                  "level": 7
+                }
+              },
+              {
+                "id": 225,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630459203763,
+                "dur": 47316,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486200,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 229,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630466986248,
+                "dur": 637390,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 226,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630466986726,
+                "dur": 16,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 1,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 227,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630466986808,
+                "dur": 636607,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 1,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 233,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630467623774,
+                "dur": 642202,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 2,
+                  "p_idx": 215,
+                  "step": 2
+                }
+              },
+              {
+                "id": 230,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630467627620,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 2,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 231,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630467627655,
+                "dur": 636557,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 2,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 237,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630468266084,
+                "dur": 641742,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 3,
+                  "p_idx": 215,
+                  "step": 3
+                }
+              },
+              {
+                "id": 234,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630468270124,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 235,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485989,
+                "tid": 485989,
+                "ts": 1760630468270154,
+                "dur": 636617,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 3,
+                  "level": 7
+                }
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "pid": 485990,
+      "tid": 485990,
+      "levels": [
+        {
+          "level": 4,
+          "groups": [
+            [
+              {
+                "id": 194,
+                "name": "DLIOBenchmark.initialize",
+                "cat": "dlio_benchmark",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458524612,
+                "dur": 223551,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 193,
+                  "level": 4
+                }
+              },
+              {
+                "id": 11,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458667000,
+                "dur": 8,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "level": 4
+                }
+              },
+              {
+                "id": 13,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458667052,
+                "dur": 3715,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "fhash": "0b5bb03819c39ad5",
+                  "level": 4
+                }
+              },
+              {
+                "id": 15,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458671203,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "level": 4
+                }
+              },
+              {
+                "id": 17,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458671235,
+                "dur": 902,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 18,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458672151,
+                "dur": 58,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 188,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458681299,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "level": 4
+                }
+              },
+              {
+                "id": 190,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458681329,
+                "dur": 994,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "fhash": "229811311ca14071",
+                  "level": 4
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 5,
+          "groups": [
+            [
+              {
+                "id": 206,
+                "name": "ai_root",
+                "cat": "ai_root",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458748182,
+                "dur": 10180107,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 5,
+                  "epoch": 2,
+                  "p_idx": 202,
+                  "step": 3
+                }
+              },
+              {
+                "id": 203,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458748229,
+                "dur": 1274,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 202,
+                  "level": 5
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 6,
+          "groups": [
+            [
+              {
+                "id": 243,
+                "name": "epoch.block",
+                "cat": "pipeline",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458803004,
+                "dur": 10117773,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "count": 1,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 215,
+                "name": "train",
+                "cat": "pipeline",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458803205,
+                "dur": 10108725,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "epoch": 2,
+                  "p_idx": 206,
+                  "step": 3
+                }
+              },
+              {
+                "id": 238,
+                "name": "TorchFramework.get_loader",
+                "cat": "ai_framework",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630468919582,
+                "dur": 8,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 239,
+                "name": "TorchDataLoader.finalize",
+                "cat": "data_loader",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630468919642,
+                "dur": 4,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 240,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630468919708,
+                "dur": 1029,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 206,
+                  "level": 6
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 7,
+          "groups": [
+            [
+              {
+                "id": 228,
+                "name": "fetch.iter",
+                "cat": "dataloader",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458803377,
+                "dur": 8040351,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 218,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458859107,
+                "dur": 16188,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486096,
+                  "level": 7
+                }
+              },
+              {
+                "id": 219,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458930177,
+                "dur": 14242,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486104,
+                  "level": 7
+                }
+              },
+              {
+                "id": 220,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630458996760,
+                "dur": 13598,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486112,
+                  "level": 7
+                }
+              },
+              {
+                "id": 221,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630459061517,
+                "dur": 14225,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486130,
+                  "level": 7
+                }
+              },
+              {
+                "id": 222,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630459107274,
+                "dur": 13516,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486167,
+                  "level": 7
+                }
+              },
+              {
+                "id": 223,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630459122047,
+                "dur": 14407,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486175,
+                  "level": 7
+                }
+              },
+              {
+                "id": 224,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630459138048,
+                "dur": 41104,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486181,
+                  "level": 7
+                }
+              },
+              {
+                "id": 225,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630459196732,
+                "dur": 50874,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486196,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 229,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630466843742,
+                "dur": 779879,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 226,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630466844214,
+                "dur": 16,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 1,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 227,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630466844294,
+                "dur": 636647,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 1,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 233,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630467625451,
+                "dur": 640527,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 2,
+                  "p_idx": 215,
+                  "step": 2
+                }
+              },
+              {
+                "id": 230,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630467629311,
+                "dur": 9,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 2,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 231,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630467629355,
+                "dur": 636554,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 2,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 237,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630468266093,
+                "dur": 641743,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 3,
+                  "p_idx": 215,
+                  "step": 3
+                }
+              },
+              {
+                "id": 234,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630468270108,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 235,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485990,
+                "tid": 485990,
+                "ts": 1760630468270139,
+                "dur": 636621,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 3,
+                  "level": 7
+                }
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "pid": 485991,
+      "tid": 485991,
+      "levels": [
+        {
+          "level": 4,
+          "groups": [
+            [
+              {
+                "id": 194,
+                "name": "DLIOBenchmark.initialize",
+                "cat": "dlio_benchmark",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458538496,
+                "dur": 209669,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 193,
+                  "level": 4
+                }
+              },
+              {
+                "id": 11,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458666997,
+                "dur": 8,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "level": 4
+                }
+              },
+              {
+                "id": 13,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458667049,
+                "dur": 3742,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "fhash": "0b5bb03819c39ad5",
+                  "level": 4
+                }
+              },
+              {
+                "id": 15,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458671206,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "level": 4
+                }
+              },
+              {
+                "id": 17,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458671238,
+                "dur": 952,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 18,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458672210,
+                "dur": 59,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 188,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458681254,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "level": 4
+                }
+              },
+              {
+                "id": 190,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458681285,
+                "dur": 1018,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "fhash": "229811311ca14071",
+                  "level": 4
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 5,
+          "groups": [
+            [
+              {
+                "id": 206,
+                "name": "ai_root",
+                "cat": "ai_root",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458748186,
+                "dur": 10180100,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 5,
+                  "epoch": 2,
+                  "p_idx": 202,
+                  "step": 3
+                }
+              },
+              {
+                "id": 203,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458748235,
+                "dur": 1269,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 202,
+                  "level": 5
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 6,
+          "groups": [
+            [
+              {
+                "id": 243,
+                "name": "epoch.block",
+                "cat": "pipeline",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458803036,
+                "dur": 10117741,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "count": 1,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 215,
+                "name": "train",
+                "cat": "pipeline",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458803229,
+                "dur": 10108873,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "epoch": 2,
+                  "p_idx": 206,
+                  "step": 3
+                }
+              },
+              {
+                "id": 238,
+                "name": "TorchFramework.get_loader",
+                "cat": "ai_framework",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630468919599,
+                "dur": 7,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 239,
+                "name": "TorchDataLoader.finalize",
+                "cat": "data_loader",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630468919657,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 240,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630468919721,
+                "dur": 1016,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 206,
+                  "level": 6
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 7,
+          "groups": [
+            [
+              {
+                "id": 228,
+                "name": "fetch.iter",
+                "cat": "dataloader",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458803398,
+                "dur": 7938469,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 218,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458858371,
+                "dur": 14907,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486091,
+                  "level": 7
+                }
+              },
+              {
+                "id": 219,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458926448,
+                "dur": 13615,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486099,
+                  "level": 7
+                }
+              },
+              {
+                "id": 220,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630458991342,
+                "dur": 13508,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486107,
+                  "level": 7
+                }
+              },
+              {
+                "id": 221,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630459055192,
+                "dur": 14229,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486118,
+                  "level": 7
+                }
+              },
+              {
+                "id": 222,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630459097816,
+                "dur": 14656,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486163,
+                  "level": 7
+                }
+              },
+              {
+                "id": 223,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630459113699,
+                "dur": 14380,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486170,
+                  "level": 7
+                }
+              },
+              {
+                "id": 224,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630459129584,
+                "dur": 43415,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486179,
+                  "level": 7
+                }
+              },
+              {
+                "id": 225,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630459174386,
+                "dur": 55958,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486190,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 229,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630466741884,
+                "dur": 881759,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 226,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630466742373,
+                "dur": 25,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 1,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 227,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630466742461,
+                "dur": 636681,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 1,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 233,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630467623880,
+                "dur": 642097,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 2,
+                  "p_idx": 215,
+                  "step": 2
+                }
+              },
+              {
+                "id": 230,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630467627768,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 2,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 231,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630467627806,
+                "dur": 636595,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 2,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 237,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630468267001,
+                "dur": 640825,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 3,
+                  "p_idx": 215,
+                  "step": 3
+                }
+              },
+              {
+                "id": 234,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630468270993,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 235,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485991,
+                "tid": 485991,
+                "ts": 1760630468271026,
+                "dur": 636649,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 3,
+                  "level": 7
+                }
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "pid": 485992,
+      "tid": 485992,
+      "levels": [
+        {
+          "level": 4,
+          "groups": [
+            [
+              {
+                "id": 194,
+                "name": "DLIOBenchmark.initialize",
+                "cat": "dlio_benchmark",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458526593,
+                "dur": 221571,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 193,
+                  "level": 4
+                }
+              },
+              {
+                "id": 11,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458667001,
+                "dur": 7,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "level": 4
+                }
+              },
+              {
+                "id": 13,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458667053,
+                "dur": 3742,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "fhash": "0b5bb03819c39ad5",
+                  "level": 4
+                }
+              },
+              {
+                "id": 15,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458671240,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "level": 4
+                }
+              },
+              {
+                "id": 17,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458671272,
+                "dur": 933,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 18,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458672221,
+                "dur": 59,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 188,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458681480,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "level": 4
+                }
+              },
+              {
+                "id": 190,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458681510,
+                "dur": 599,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "fhash": "229811311ca14071",
+                  "level": 4
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 5,
+          "groups": [
+            [
+              {
+                "id": 206,
+                "name": "ai_root",
+                "cat": "ai_root",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458748184,
+                "dur": 10180107,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 5,
+                  "epoch": 2,
+                  "p_idx": 202,
+                  "step": 3
+                }
+              },
+              {
+                "id": 203,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458748232,
+                "dur": 1272,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 202,
+                  "level": 5
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 6,
+          "groups": [
+            [
+              {
+                "id": 243,
+                "name": "epoch.block",
+                "cat": "pipeline",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458803063,
+                "dur": 10117713,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "count": 1,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 215,
+                "name": "train",
+                "cat": "pipeline",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458803249,
+                "dur": 10108850,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "epoch": 2,
+                  "p_idx": 206,
+                  "step": 3
+                }
+              },
+              {
+                "id": 238,
+                "name": "TorchFramework.get_loader",
+                "cat": "ai_framework",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630468919605,
+                "dur": 8,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 239,
+                "name": "TorchDataLoader.finalize",
+                "cat": "data_loader",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630468919665,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 240,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630468919729,
+                "dur": 1008,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 206,
+                  "level": 6
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 7,
+          "groups": [
+            [
+              {
+                "id": 228,
+                "name": "fetch.iter",
+                "cat": "dataloader",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458803422,
+                "dur": 8004755,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 218,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458858372,
+                "dur": 15774,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486093,
+                  "level": 7
+                }
+              },
+              {
+                "id": 219,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458929682,
+                "dur": 13343,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486101,
+                  "level": 7
+                }
+              },
+              {
+                "id": 220,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630458996418,
+                "dur": 12808,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486109,
+                  "level": 7
+                }
+              },
+              {
+                "id": 221,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630459060643,
+                "dur": 13871,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486127,
+                  "level": 7
+                }
+              },
+              {
+                "id": 222,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630459104332,
+                "dur": 13692,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486164,
+                  "level": 7
+                }
+              },
+              {
+                "id": 223,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630459119260,
+                "dur": 14399,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486172,
+                  "level": 7
+                }
+              },
+              {
+                "id": 224,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630459135332,
+                "dur": 45439,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486182,
+                  "level": 7
+                }
+              },
+              {
+                "id": 225,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630459193669,
+                "dur": 52786,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486193,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 229,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630466808191,
+                "dur": 815432,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 226,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630466808662,
+                "dur": 15,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 1,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 227,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630466808730,
+                "dur": 636619,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 1,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 233,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630467624838,
+                "dur": 641142,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 2,
+                  "p_idx": 215,
+                  "step": 2
+                }
+              },
+              {
+                "id": 230,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630467628781,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 2,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 231,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630467628822,
+                "dur": 636608,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 2,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 237,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630468266803,
+                "dur": 641033,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 3,
+                  "p_idx": 215,
+                  "step": 3
+                }
+              },
+              {
+                "id": 234,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630468270835,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 235,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485992,
+                "tid": 485992,
+                "ts": 1760630468270868,
+                "dur": 636625,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 3,
+                  "level": 7
+                }
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "pid": 485993,
+      "tid": 485993,
+      "levels": [
+        {
+          "level": 4,
+          "groups": [
+            [
+              {
+                "id": 194,
+                "name": "DLIOBenchmark.initialize",
+                "cat": "dlio_benchmark",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458526669,
+                "dur": 221497,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 193,
+                  "level": 4
+                }
+              },
+              {
+                "id": 11,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458667002,
+                "dur": 8,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "level": 4
+                }
+              },
+              {
+                "id": 13,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458667054,
+                "dur": 3748,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "fhash": "0b5bb03819c39ad5",
+                  "level": 4
+                }
+              },
+              {
+                "id": 15,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458671231,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "level": 4
+                }
+              },
+              {
+                "id": 17,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458671262,
+                "dur": 938,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 18,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458672216,
+                "dur": 59,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 188,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458681299,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "level": 4
+                }
+              },
+              {
+                "id": 190,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458681329,
+                "dur": 987,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "fhash": "229811311ca14071",
+                  "level": 4
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 5,
+          "groups": [
+            [
+              {
+                "id": 206,
+                "name": "ai_root",
+                "cat": "ai_root",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458748186,
+                "dur": 10180099,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 5,
+                  "epoch": 2,
+                  "p_idx": 202,
+                  "step": 3
+                }
+              },
+              {
+                "id": 203,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458748232,
+                "dur": 1272,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 202,
+                  "level": 5
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 6,
+          "groups": [
+            [
+              {
+                "id": 243,
+                "name": "epoch.block",
+                "cat": "pipeline",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458803030,
+                "dur": 10117751,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "count": 1,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 215,
+                "name": "train",
+                "cat": "pipeline",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458803219,
+                "dur": 10108850,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "epoch": 2,
+                  "p_idx": 206,
+                  "step": 3
+                }
+              },
+              {
+                "id": 238,
+                "name": "TorchFramework.get_loader",
+                "cat": "ai_framework",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630468919580,
+                "dur": 12,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 239,
+                "name": "TorchDataLoader.finalize",
+                "cat": "data_loader",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630468919645,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 240,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630468919711,
+                "dur": 1027,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 206,
+                  "level": 6
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 7,
+          "groups": [
+            [
+              {
+                "id": 228,
+                "name": "fetch.iter",
+                "cat": "dataloader",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458803389,
+                "dur": 8146371,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 218,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458858342,
+                "dur": 12070,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486090,
+                  "level": 7
+                }
+              },
+              {
+                "id": 219,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458922393,
+                "dur": 13899,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486097,
+                  "level": 7
+                }
+              },
+              {
+                "id": 220,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630458981720,
+                "dur": 14227,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486105,
+                  "level": 7
+                }
+              },
+              {
+                "id": 221,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630459038058,
+                "dur": 14549,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486113,
+                  "level": 7
+                }
+              },
+              {
+                "id": 222,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630459095524,
+                "dur": 14622,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486162,
+                  "level": 7
+                }
+              },
+              {
+                "id": 223,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630459111414,
+                "dur": 13776,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486169,
+                  "level": 7
+                }
+              },
+              {
+                "id": 224,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630459126680,
+                "dur": 33583,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486178,
+                  "level": 7
+                }
+              },
+              {
+                "id": 225,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630459162517,
+                "dur": 43265,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486185,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 229,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630466949776,
+                "dur": 673865,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 226,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630466950271,
+                "dur": 15,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 1,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 227,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630466950346,
+                "dur": 636624,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 1,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 233,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630467624775,
+                "dur": 641203,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 2,
+                  "p_idx": 215,
+                  "step": 2
+                }
+              },
+              {
+                "id": 230,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630467628677,
+                "dur": 7,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 2,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 231,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630467628719,
+                "dur": 636554,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 2,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 237,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630468266782,
+                "dur": 641045,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 3,
+                  "p_idx": 215,
+                  "step": 3
+                }
+              },
+              {
+                "id": 234,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630468270770,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 235,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485993,
+                "tid": 485993,
+                "ts": 1760630468270803,
+                "dur": 636628,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 3,
+                  "level": 7
+                }
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "pid": 485994,
+      "tid": 485994,
+      "levels": [
+        {
+          "level": 4,
+          "groups": [
+            [
+              {
+                "id": 194,
+                "name": "DLIOBenchmark.initialize",
+                "cat": "dlio_benchmark",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458518418,
+                "dur": 229746,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 193,
+                  "level": 4
+                }
+              },
+              {
+                "id": 11,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458666996,
+                "dur": 8,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "level": 4
+                }
+              },
+              {
+                "id": 13,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458667050,
+                "dur": 3342,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 10,
+                  "fhash": "0b5bb03819c39ad5",
+                  "level": 4
+                }
+              },
+              {
+                "id": 15,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458671198,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "level": 4
+                }
+              },
+              {
+                "id": 17,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458671231,
+                "dur": 959,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 18,
+                "name": "__xstat64",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458672208,
+                "dur": 59,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 14,
+                  "fhash": "39b1cb981347c868",
+                  "level": 4
+                }
+              },
+              {
+                "id": 188,
+                "name": "FileStorage.get_uri",
+                "cat": "storage",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458681182,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "level": 4
+                }
+              },
+              {
+                "id": 190,
+                "name": "opendir",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458681212,
+                "dur": 1123,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 187,
+                  "fhash": "229811311ca14071",
+                  "level": 4
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 5,
+          "groups": [
+            [
+              {
+                "id": 206,
+                "name": "ai_root",
+                "cat": "ai_root",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458748183,
+                "dur": 10180096,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 5,
+                  "epoch": 2,
+                  "p_idx": 202,
+                  "step": 3
+                }
+              },
+              {
+                "id": 203,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458748230,
+                "dur": 1274,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 202,
+                  "level": 5
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 6,
+          "groups": [
+            [
+              {
+                "id": 243,
+                "name": "epoch.block",
+                "cat": "pipeline",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458803037,
+                "dur": 10117742,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "count": 1,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 215,
+                "name": "train",
+                "cat": "pipeline",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458803225,
+                "dur": 10108877,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "epoch": 2,
+                  "p_idx": 206,
+                  "step": 3
+                }
+              },
+              {
+                "id": 238,
+                "name": "TorchFramework.get_loader",
+                "cat": "ai_framework",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630468919593,
+                "dur": 8,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 239,
+                "name": "TorchDataLoader.finalize",
+                "cat": "data_loader",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630468919652,
+                "dur": 4,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 6,
+                  "p_idx": 206,
+                  "step": 3,
+                  "epoch": 2
+                }
+              },
+              {
+                "id": 240,
+                "name": "ConfigArguments.reconfigure",
+                "cat": "config",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630468919724,
+                "dur": 1014,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 206,
+                  "level": 6
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "level": 7,
+          "groups": [
+            [
+              {
+                "id": 228,
+                "name": "fetch.iter",
+                "cat": "dataloader",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458803396,
+                "dur": 8001262,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 218,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458858416,
+                "dur": 16048,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486094,
+                  "level": 7
+                }
+              },
+              {
+                "id": 219,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458930108,
+                "dur": 13607,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486103,
+                  "level": 7
+                }
+              },
+              {
+                "id": 220,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630458996672,
+                "dur": 13084,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486110,
+                  "level": 7
+                }
+              },
+              {
+                "id": 221,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630459061419,
+                "dur": 13831,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486128,
+                  "level": 7
+                }
+              },
+              {
+                "id": 222,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630459106360,
+                "dur": 14098,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486166,
+                  "level": 7
+                }
+              },
+              {
+                "id": 223,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630459121691,
+                "dur": 14769,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486174,
+                  "level": 7
+                }
+              },
+              {
+                "id": 224,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630459138047,
+                "dur": 40551,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486180,
+                  "level": 7
+                }
+              },
+              {
+                "id": 225,
+                "name": "fork",
+                "cat": "POSIX",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630459196536,
+                "dur": 51054,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "ret": 486195,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 229,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630466804676,
+                "dur": 818945,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 1,
+                  "p_idx": 215,
+                  "step": 1
+                }
+              },
+              {
+                "id": 226,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630466805159,
+                "dur": 14,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 1,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 227,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630466805241,
+                "dur": 636604,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 1,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 233,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630467624665,
+                "dur": 641315,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 2,
+                  "p_idx": 215,
+                  "step": 2
+                }
+              },
+              {
+                "id": 230,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630467628600,
+                "dur": 6,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 2,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 231,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630467628642,
+                "dur": 636556,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 2,
+                  "level": 7
+                }
+              }
+            ],
+            [
+              {
+                "id": 237,
+                "name": "fetch.block",
+                "cat": "dataloader",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630468266780,
+                "dur": 641057,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "count": 3,
+                  "p_idx": 215,
+                  "step": 3
+                }
+              },
+              {
+                "id": 234,
+                "name": "TorchFramework.trace_object",
+                "cat": "ai_framework",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630468270807,
+                "dur": 5,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "level": 7,
+                  "p_idx": 215,
+                  "step": 3,
+                  "epoch": 0
+                }
+              },
+              {
+                "id": 235,
+                "name": "compute",
+                "cat": "compute",
+                "pid": 485994,
+                "tid": 485994,
+                "ts": 1760630468270840,
+                "dur": 636631,
+                "ph": "X",
+                "args": {
+                  "hhash": "2dbbcec2c820dc4c",
+                  "p_idx": 215,
+                  "step": 3,
+                  "level": 7
+                }
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,340 @@
+/* Inline Drawing Controls (in controls panel with sliders) */
+.drawing-controls-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  width: 100%;
+  padding: 15px 0 0 0;
+  border-top: 2px solid #e0e0e0;
+  margin-top: 15px;
+}
+
+.drawing-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.section-icon {
+  font-size: 20px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.drawing-controls-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  align-items: center;
+}
+
+.drawing-control-item {
+  position: relative;
+}
+
+/* Canvas Overlay (positioned over chart) */
+.gantt-drawing-canvas-overlay {
+  position: absolute;
+  /* top, left, width, height set dynamically via inline styles */
+  pointer-events: auto;
+  z-index: 10;
+  overflow: visible;
+}
+
+/* Control Buttons */
+.control-btn {
+  padding: 10px 20px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.control-btn:hover:not(:disabled) {
+  background: #f5f5f5;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.control-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.control-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-btn {
+  font-weight: 600;
+  min-width: 120px;
+}
+
+.toggle-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-color: #667eea;
+}
+
+/* Color Picker */
+.color-picker-wrapper {
+  position: relative;
+}
+
+.color-btn {
+  width: 50px;
+  height: 50px;
+  padding: 0;
+  border: 2px solid #333;
+  border-radius: 8px;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.color-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+
+.color-palette-inline {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 8px;
+  background: white;
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+}
+
+.color-swatch {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.color-swatch:hover {
+  transform: scale(1.15);
+}
+
+/* Brush Size Control */
+.brush-size-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 150px;
+}
+
+.brush-size-label {
+  font-size: 13px;
+  color: #666;
+  font-weight: 500;
+}
+
+.brush-size-slider {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: #ddd;
+  outline: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.brush-size-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #667eea;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.brush-size-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #667eea;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.brush-size-slider:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Sort Mode Dropdown */
+.sort-mode-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+}
+
+.sort-mode-label {
+  font-size: 13px;
+  color: #666;
+  font-weight: 500;
+}
+
+.sort-mode-select {
+  padding: 10px 12px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.sort-mode-select:hover {
+  background: #f5f5f5;
+}
+
+.sort-mode-select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.18);
+}
+
+/* Clear Button */
+.clear-btn {
+  background: #fee;
+  border-color: #fcc;
+  color: #c33;
+  min-width: 100px;
+}
+
+.clear-btn:hover:not(:disabled) {
+  background: #fdd;
+}
+
+/* Export Button */
+.export-btn {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+  color: #2e7d32;
+  font-weight: 600;
+  min-width: 120px;
+}
+
+.export-btn:hover:not(:disabled) {
+  background: #c8e6c9;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+  .drawing-controls-grid {
+    gap: 10px;
+  }
+
+  .control-btn {
+    padding: 8px 16px;
+    font-size: 13px;
+  }
+
+  .brush-size-inline {
+    min-width: 120px;
+  }
+}
+
+@media (max-width: 900px) {
+  .drawing-controls-inline {
+    padding: 12px 0 0 0;
+    margin-top: 10px;
+  }
+
+  .drawing-controls-grid {
+    justify-content: flex-start;
+  }
+
+  .control-btn {
+    padding: 8px 14px;
+    font-size: 12px;
+  }
+
+  .toggle-btn {
+    min-width: 100px;
+  }
+
+  .color-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .brush-size-inline {
+    min-width: 110px;
+  }
+
+  .clear-btn,
+  .export-btn {
+    min-width: 90px;
+  }
+}
+
+@media (max-width: 600px) {
+  .drawing-controls-grid {
+    gap: 8px;
+  }
+
+  .control-btn {
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+
+  .toggle-btn {
+    min-width: 85px;
+  }
+
+  .color-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 16px;
+  }
+
+  .color-palette-inline {
+    grid-template-columns: repeat(4, 1fr);
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .color-swatch {
+    width: 30px;
+    height: 30px;
+  }
+
+  .brush-size-inline {
+    min-width: 100px;
+  }
+
+  .section-title {
+    font-size: 14px;
+  }
+
+  .section-icon {
+    font-size: 18px;
+  }
+}
