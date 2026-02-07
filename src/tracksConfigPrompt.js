@@ -57,16 +57,42 @@ export const PREDEFINED_FILTER_FUNCTIONS = {
  */
 export function parseTrackConfigFromResponse(responseText) {
   try {
-    // Look for JSON code blocks
-    const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/;
-    const match = responseText.match(jsonBlockRegex);
+    const text = String(responseText ?? '').trim();
 
-    if (!match) {
-      return null;
+    const tryParse = (raw) => {
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    };
+
+    // Look for JSON code blocks first
+    const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/;
+    const match = text.match(jsonBlockRegex);
+    let parsed = null;
+
+    if (match) {
+      parsed = tryParse(match[1]);
     }
 
-    const jsonContent = match[1];
-    const parsed = JSON.parse(jsonContent);
+    // If no JSON block, try to parse the entire response as JSON
+    if (!parsed && (text.startsWith('{') || text.startsWith('['))) {
+      parsed = tryParse(text);
+    }
+
+    // Fallback: try to extract the first JSON object from the response
+    if (!parsed) {
+      const objectMatch = text.match(/\{[\s\S]*\}/);
+      if (objectMatch) {
+        parsed = tryParse(objectMatch[0]);
+      }
+    }
+
+    if (!parsed) {
+      return null;
+    }
 
     if (parsed.action === 'configure_tracks' && parsed.config) {
       return parsed;
@@ -81,6 +107,10 @@ export function parseTrackConfigFromResponse(responseText) {
     }
 
     if (parsed.action === 'update_widget_config' && parsed.patch) {
+      return parsed;
+    }
+
+    if (parsed.action === 'clarification_needed') {
       return parsed;
     }
 
@@ -182,7 +212,12 @@ export function convertLLMConfigToTracksConfig(llmConfig, data) {
 export function getEnhancedSystemPrompt(chartContext) {
   const basePrompt = TRACKS_CONFIG_SYSTEM_PROMPT;
 
-  const contextInfo = `
+  const contextInfo = chartContext.activeConfigItem ? `
+
+## Current Chart Context
+
+- Current config: ${chartContext.configSummary || 'unknown'}
+` : `
 
 ## Current Chart Context
 
@@ -193,6 +228,23 @@ export function getEnhancedSystemPrompt(chartContext) {
 - Current config: ${chartContext.configSummary || 'unknown'}
 `;
 
-  return basePrompt + contextInfo;
+  const activeItem = chartContext.activeConfigItem;
+  const activeInfo = activeItem ? `
+
+## Active Config Target (STRICT)
+
+You MUST ONLY update this path:
+- Path: ${activeItem.path}
+- Label: ${activeItem.label}
+- Description: ${activeItem.description || 'n/a'}
+- Current value (JSON): ${JSON.stringify(activeItem.currentValue ?? null)}
+- Example: ${activeItem.example || 'n/a'}
+
+If the user asks for changes outside this path, ask them to select the correct config button.
+Only emit a patch that updates the active path.
+Do not output configure_tracks or widget actions while a target is active.
+` : '';
+
+  return basePrompt + contextInfo + activeInfo;
 }
 

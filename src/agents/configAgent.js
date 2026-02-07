@@ -1,0 +1,308 @@
+import { CONFIG_INDEX, formatConfigIndexForPrompt, findMatchingConfigs } from './configIndex';
+import ganttConfigSpec from '../GANTT_CONFIG_SPEC.json';
+
+/**
+ * Config Agent
+ * 
+ * Handles user configuration modification requests with semantic understanding.
+ * Uses the comprehensive Config Index and current data schema for context.
+ */
+
+// Build Rule DSL reference from spec
+function buildRuleDslReference() {
+  if (!ganttConfigSpec.ruleDsl) {
+    return 'No rule DSL information available.';
+  }
+  
+  const dsl = ganttConfigSpec.ruleDsl;
+  const sections = [];
+  
+  // Expression operations
+  if (dsl.exprOps && dsl.exprOps.length > 0) {
+    sections.push(`Expression operations: ${dsl.exprOps.join(', ')}`);
+  }
+  
+  // Transform names
+  if (dsl.transformNames && dsl.transformNames.length > 0) {
+    sections.push(`Transform types: ${dsl.transformNames.join(', ')}`);
+  }
+  
+  // Context variables
+  if (dsl.context) {
+    const contextLines = Object.entries(dsl.context).map(
+      ([key, desc]) => `  - ${key}: ${desc}`
+    );
+    sections.push(`Context variables:\n${contextLines.join('\n')}`);
+  }
+  
+  return sections.join('\n\n');
+}
+
+/**
+ * Standard internal field names that are always available on events
+ * These are added to events alongside the original field names
+ */
+const INTERNAL_FIELDS = ['pid', 'tid', 'ppid', 'level', 'start', 'end', 'id', 'name', 'cat', 'args'];
+
+/**
+ * Build the system prompt dynamically - NO static placeholders, all real data
+ */
+export function buildConfigAgentPrompt(options) {
+  const {
+    schema,
+    eventFields,
+    sampleEvents,
+    currentConfig,
+    activeConfigItem,
+    fieldMapping
+  } = options;
+
+  // Schema info - show original detected fields
+  const schemaStr = schema && schema.fields 
+    ? JSON.stringify({
+        detectedFields: schema.fields.map(f => ({
+          originalName: f.originalName,
+          semantic: f.semantic,
+          type: f.type
+        })),
+        fieldMapping: fieldMapping || {},
+        format: schema.dataFormat,
+        note: "Events have BOTH original fields AND standard internal fields (start, end, pid, tid, etc.)"
+      }, null, 2)
+    : 'No schema information available';
+
+  // Format current config
+  const configStr = currentConfig 
+    ? JSON.stringify(currentConfig, null, 2)
+    : '{}';
+
+  // Format event fields - ONLY from real data, NO hardcoded fields
+  const fieldsArray = Array.isArray(eventFields) ? eventFields : [];
+  const eventFieldsStr = fieldsArray.length > 0
+    ? fieldsArray.map(f => `event.${f}`).join(', ')
+    : 'No event fields detected';
+
+  // Format sample events - show real data to the LLM
+  const sampleStr = Array.isArray(sampleEvents) && sampleEvents.length > 0
+    ? JSON.stringify(sampleEvents.slice(0, 3), null, 2)
+    : 'No sample events available';
+
+  // Format active config target
+  const activeTargetStr = activeConfigItem ? [
+    `Path: ${activeConfigItem.path}`,
+    `Label: ${activeConfigItem.label}`,
+    `Description: ${activeConfigItem.description || 'n/a'}`,
+    `Current value (JSON): ${JSON.stringify(activeConfigItem.currentValue ?? null)}`,
+    `Example: ${activeConfigItem.example || 'n/a'}`,
+    'Only update this path. If the user asks for changes outside this path, ask them to select the correct config button.'
+  ].join('\n') : 'None';
+
+  // Build prompt using template literal - direct string, no placeholders
+  const prompt = `You are a Gantt chart configuration assistant.
+
+## Data Schema (detected from loaded data)
+${schemaStr}
+
+## Available Event Fields
+All fields available on each event:
+${eventFieldsStr}
+
+Sample events from the actual data:
+${sampleStr}
+
+IMPORTANT: Use the field names EXACTLY as shown in the sample events above.
+When writing { "op": "get", "path": "event.XXX" }, XXX must be one of the field names from the sample.
+
+## Available Configuration Items
+${formatConfigIndexForPrompt()}
+
+## Current Configuration
+${configStr}
+
+## Active Config Target (optional)
+${activeTargetStr}
+
+## Rule DSL Reference
+${buildRuleDslReference()}
+
+Common expression patterns:
+- Get field: { "op": "get", "path": "event.FIELDNAME" } - use actual field names from the list above
+- Get variable: { "op": "var", "name": "varName" } (pid, tid, level, startUs, durationUs, etc.)
+- Coalesce: { "op": "coalesce", "args": [expr1, expr2, ...] }
+- Concatenate: { "op": "concat", "args": ["string", expr, ...] }
+- Conditional: { "op": "if", "args": [condition, thenValue, elseValue] }
+- Comparisons: { "op": "==", "args": [left, right] } (also: !=, >, <, >=, <=)
+- Logic: { "op": "and", "args": [expr1, expr2] } (also: or, not)
+- Math: { "op": "add", "args": [expr1, expr2] } (also: sub, mul, div)
+- Hash color: { "op": "paletteHash", "args": [keyExpr, paletteVar] }
+- Format time: { "op": "formatTimeUs", "args": [timeExpr] }
+- Format duration: { "op": "formatDurationUs", "args": [durationExpr] }
+
+Common transform patterns:
+- Fork tree: { "type": "transform", "name": "forkTree", "params": { "includeUnspecified": true } }
+- Sort by: { "type": "transform", "name": "sortBy", "params": { "key": "stats.totalDurUs", "desc": true } }
+- Auto pack: { "type": "transform", "name": "autoPack" }
+- By level: { "type": "transform", "name": "byLevel" }
+
+## Task
+Based on the user's request, output a config patch.
+
+IMPORTANT:
+1. Only modify the specific config items relevant to the request
+2. Use the correct path from the Available Configuration Items
+3. For rule-type configs, use the Rule DSL format exactly as shown above
+4. Keep patches minimal and focused
+5. CRITICAL: For event field paths, use ONLY the fields listed in "Available Event Fields" above
+6. If an Active Config Target is provided, you MUST ONLY update that path
+7. Output ONLY a single JSON block. Do NOT include any extra text
+
+Output format:
+\`\`\`json
+{
+  "action": "update_gantt_config",
+  "patch": {
+    "section": {
+      "configItem": value
+    }
+  },
+  "targetPath": "the.config.path.being.modified",
+  "explanation": "Brief explanation of what this change does"
+}
+\`\`\`
+
+If the user's request is ambiguous or you need more information, output:
+\`\`\`json
+{
+  "action": "clarification_needed",
+  "question": "What specific aspect would you like to configure?",
+  "suggestions": ["suggestion1", "suggestion2"]
+}
+\`\`\`
+
+Return ONLY the JSON block above. No commentary.`;
+
+  return prompt;
+}
+
+// Pre-process user message to find likely config targets
+export function preprocessUserMessage(message) {
+  const matches = findMatchingConfigs(message, 5);
+  
+  return {
+    originalMessage: message,
+    likelyTargets: matches.map(m => ({
+      path: m.path,
+      score: m.score,
+      description: m.config.description
+    })),
+    hints: matches.length > 0 
+      ? `Likely config targets: ${matches.map(m => m.path).join(', ')}`
+      : 'No clear config target identified'
+  };
+}
+
+// Validate config patch against schema
+export function validatePatch(patch, schema) {
+  const errors = [];
+  const warnings = [];
+  
+  if (!patch || typeof patch !== 'object') {
+    errors.push('Patch must be an object');
+    return { valid: false, errors, warnings };
+  }
+  
+  // Recursively check paths
+  function checkPath(obj, currentPath = '') {
+    for (const [key, value] of Object.entries(obj)) {
+      const fullPath = currentPath ? `${currentPath}.${key}` : key;
+      
+      // Check if path exists in CONFIG_INDEX
+      const configItem = CONFIG_INDEX[fullPath];
+      
+      if (configItem) {
+        // Validate against schema
+        if (configItem.kind === 'rule') {
+          if (typeof value !== 'object' || !value.type) {
+            warnings.push(`${fullPath}: Expected a rule object with 'type' field`);
+          }
+        }
+        
+        if (configItem.schema) {
+          // Type checking
+          const schemaType = configItem.schema.type;
+          if (schemaType === 'number' && typeof value !== 'number') {
+            warnings.push(`${fullPath}: Expected number, got ${typeof value}`);
+          } else if (schemaType === 'boolean' && typeof value !== 'boolean') {
+            warnings.push(`${fullPath}: Expected boolean, got ${typeof value}`);
+          } else if (schemaType === 'string' && typeof value !== 'string') {
+            warnings.push(`${fullPath}: Expected string, got ${typeof value}`);
+          } else if (schemaType === 'array' && !Array.isArray(value)) {
+            warnings.push(`${fullPath}: Expected array, got ${typeof value}`);
+          } else if (schemaType === 'object' && (typeof value !== 'object' || Array.isArray(value))) {
+            warnings.push(`${fullPath}: Expected object, got ${typeof value}`);
+          }
+        }
+      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // Recurse into nested objects
+        checkPath(value, fullPath);
+      }
+    }
+  }
+  
+  checkPath(patch);
+  
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings
+  };
+}
+
+// Extract target path from patch
+export function extractTargetPath(patch) {
+  if (!patch || typeof patch !== 'object') return null;
+  
+  // Try to find the deepest path that exists in CONFIG_INDEX
+  const paths = [];
+  
+  function collectPaths(obj, currentPath = '') {
+    for (const [key, value] of Object.entries(obj)) {
+      const fullPath = currentPath ? `${currentPath}.${key}` : key;
+      
+      if (CONFIG_INDEX[fullPath]) {
+        paths.push(fullPath);
+      }
+      
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        collectPaths(value, fullPath);
+      }
+    }
+  }
+  
+  collectPaths(patch);
+  
+  // Return the deepest path (longest path string)
+  if (paths.length === 0) return null;
+  
+  return paths.sort((a, b) => b.split('.').length - a.split('.').length)[0];
+}
+
+// Build enhanced system prompt for chat
+export function buildSystemPrompt(chartContext) {
+  const prompt = buildConfigAgentPrompt({
+    schema: chartContext.schema,
+    eventFields: chartContext.eventFields,
+    sampleEvents: chartContext.sampleEvents,
+    currentConfig: chartContext.currentConfig,
+    activeConfigItem: chartContext.activeConfigItem,
+    fieldMapping: chartContext.fieldMapping
+  });
+  
+  // Debug: log what fields are in the prompt
+  console.log('[Config Agent] Building prompt with:');
+  console.log('  - eventFields:', chartContext.eventFields);
+  console.log('  - sampleEvents count:', chartContext.sampleEvents?.length || 0);
+  console.log('  - fieldMapping:', chartContext.fieldMapping);
+  
+  return prompt;
+}

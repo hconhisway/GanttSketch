@@ -20,7 +20,7 @@ export const DrawingControls = forwardRef(function DrawingControls({
 }, ref) {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const colors = [
-    ...(GANTT_CONFIG.colorMapping?.palette || []),
+    ...(GANTT_CONFIG.color?.palette || []),
     '#111827',
     '#FFFFFF'
   ];

@@ -3,27 +3,27 @@ export const DEFAULT_WIDGET_CONFIG = {
     placement: 'top-left',
     direction: 'row',
     wrap: 'wrap',
-    gap: 12,
+    gap: 0,
     maxWidth: '100%',
-    alignItems: 'stretch'
+    alignItems: 'center'
   },
   style: {
     container: {
-      background: '#ffffff',
-      padding: '16px 20px',
-      borderRadius: 8,
-      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
+      background: 'transparent',
+      padding: '0',
+      borderRadius: 0,
+      boxShadow: 'none'
     },
     widgetCard: {
-      background: '#f8fafc',
-      border: '1px solid #e2e8f0',
-      borderRadius: 8,
-      padding: '12px 14px'
+      background: 'transparent',
+      border: 'none',
+      borderRadius: 0,
+      padding: '0'
     },
     widgetTitle: {
-      fontSize: 13,
-      fontWeight: 600,
-      color: '#1f2937'
+      fontSize: 12,
+      fontWeight: 500,
+      color: '#64748b'
     }
   }
 };
@@ -85,19 +85,19 @@ Each widget has two parts:
 1) HTML markup that defines the UI (no <script> tags).
 2) JavaScript callback(s) that listen for UI changes and update the visualization.
 
-## Output Format (always JSON code block)
+## STRICT OUTPUT FORMAT (always JSON code block)
 \`\`\`json
 {
   "action": "create_widget",
   "widget": {
     "id": "kebab-case-id",
     "name": "Short Widget Title",
-    "html": "<label>...</label><select>...</select>",
+    "html": "<HTML_TEMPLATE>",
     "listeners": [
       {
-        "selector": "select",
-        "event": "change",
-        "handler": "const mode = payload.value; api.setProcessSortMode(mode); api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), { \\"yAxis\\": { \\"orderMode\\": mode === \\"fork\\" ? \\"fork\\" : \\"default\\" } }));"
+        "selector": "<CSS_SELECTOR>",
+        "event": "<EVENT_TYPE>",
+        "handler": "<JS_HANDLER_TEMPLATE>"
       }
     ],
     "description": "Short explanation of what the widget does."
@@ -105,7 +105,157 @@ Each widget has two parts:
 }
 \`\`\`
 
-You may also update existing widgets using action "update_widget":
+## HTML Templates (DynaVis-style compact inline)
+IMPORTANT: Keep HTML minimal and compact. The widget "name" is already shown as a label, so avoid duplicating it in HTML.
+
+**Dropdown/Select (no label - name serves as label):**
+\`\`\`html
+<select id="widget-id"><option value="val1">Option 1</option><option value="val2">Option 2</option></select>
+\`\`\`
+
+**Dropdown with inline label (when extra context needed):**
+\`\`\`html
+<select id="widget-id"><option value="" disabled>Choose...</option><option value="val1">Option 1</option></select>
+\`\`\`
+
+**Checkbox (compact inline):**
+\`\`\`html
+<input type="checkbox" id="widget-id" />
+\`\`\`
+
+**Range Slider (with value display):**
+\`\`\`html
+<input type="range" id="widget-id" min="0" max="100" value="50" /><span id="widget-id-val">50</span>
+\`\`\`
+
+**Button:**
+\`\`\`html
+<button type="button" id="widget-id">Action</button>
+\`\`\`
+
+**Text Input (use placeholder instead of label):**
+\`\`\`html
+<input type="text" id="widget-id" placeholder="Enter value..." />
+\`\`\`
+
+**Multiple controls (use spans for grouping):**
+\`\`\`html
+<button id="btn-a">A</button><button id="btn-b">B</button>
+\`\`\`
+
+## JavaScript Handler Templates
+Handlers receive: (payload, api, widget)
+- payload: { event, target, value, widgetRoot }
+- api: chart control methods
+- widget: the widget DOM container
+
+**Apply Fixed Color (single color for all bars):**
+\`\`\`javascript
+api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), {
+  color: { fixedColor: 'rgba(0,0,0,0.38)' }
+}));
+\`\`\`
+
+**Reset to Default Colors:**
+\`\`\`javascript
+api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), {
+  color: { fixedColor: null }
+}));
+\`\`\`
+
+**Set Palette (array of color strings):**
+\`\`\`javascript
+api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), {
+  color: { palette: ['#2563EB', '#0EA5E9', '#14B8A6', '#10B981'] }
+}));
+\`\`\`
+
+**Set Color Key Rule (expression object, NOT string):**
+\`\`\`javascript
+api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), {
+  color: { keyRule: { type: 'expr', expr: { op: 'get', path: 'event.cat' } } }
+}));
+\`\`\`
+
+**Set Process Order:**
+\`\`\`javascript
+const mode = payload.value;
+api.setProcessSortMode(mode);
+const rule = mode === 'fork'
+  ? { type: 'transform', name: 'forkTree', params: { includeUnspecified: true } }
+  : { type: 'transform', name: 'pidAsc' };
+api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), { yAxis: { processOrderRule: rule } }));
+\`\`\`
+
+**Toggle Between Two States:**
+\`\`\`javascript
+const isChecked = payload.target.checked;
+if (isChecked) {
+  // Apply state A
+  api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), { color: { fixedColor: '#000' } }));
+} else {
+  // Apply state B (reset)
+  api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), { color: { fixedColor: null } }));
+}
+\`\`\`
+
+## CRITICAL: Config Value Formats
+
+### Color Config (IMPORTANT - common mistake source)
+| Property | Type | Example | Description |
+|----------|------|---------|-------------|
+| fixedColor | string | 'rgba(0,0,0,0.38)' | Single color for ALL bars |
+| palette | string[] | ['#ff0000', '#00ff00'] | Array of color STRINGS, not objects |
+| keyRule | object | { type: 'expr', expr: {...} } | Expression object, NOT a string |
+| colorRule | object | { type: 'expr', expr: {...} } | Expression object, NOT a string |
+
+**WRONG (DO NOT USE):**
+\`\`\`javascript
+// WRONG: keyRule as string
+{ color: { keyRule: 'black' } }
+
+// WRONG: palette as array of objects
+{ color: { palette: [ { id: 'black', colors: ['#000'] } ] } }
+\`\`\`
+
+**CORRECT:**
+\`\`\`javascript
+// CORRECT: Use fixedColor for single color
+{ color: { fixedColor: 'rgba(0,0,0,0.38)' } }
+
+// CORRECT: palette is array of color strings
+{ color: { palette: ['#000000', '#ff0000', '#00ff00'] } }
+
+// CORRECT: keyRule is expression object
+{ color: { keyRule: { type: 'expr', expr: { op: 'get', path: 'event.cat' } } } }
+\`\`\`
+
+### Y-Axis Config
+| Property | Type | Example |
+|----------|------|---------|
+| processOrderRule | object | { type: 'transform', name: 'forkTree', params: {...} } |
+| threadLaneRule | object | { type: 'transform', name: 'autoPack' } |
+
+### Expression DSL
+Available operations: get, var, concat, if, coalesce, ==, !=, and, or, add, sub, mul, div, paletteHash
+Context variables: pid, tid, level, colorKey, palette, startUs, durationUs
+
+## API Reference
+| Method | Description |
+|--------|-------------|
+| api.getGanttConfig() | Get current config |
+| api.setGanttConfig(config) | Set entire config |
+| api.applyGanttConfigPatch(base, patch) | Merge patch into config, returns new config |
+| api.setProcessSortMode(mode) | Set "fork" or "default" sorting |
+| api.setViewRange({ start, end }) | Set visible time range (microseconds) |
+| api.setYAxisWidth(px) | Set Y-axis width |
+| api.getTracksConfig() | Get tracks config |
+| api.setTracksConfig(config) | Set tracks config |
+| api.setIsDrawingMode(bool) | Toggle drawing mode |
+| api.setBrushSize(n) | Set brush size |
+| api.setBrushColor(color) | Set brush color |
+
+## You may also update existing widgets using action "update_widget":
 \`\`\`json
 {
   "action": "update_widget",
@@ -118,17 +268,6 @@ You may also update existing widgets using action "update_widget":
   }
 }
 \`\`\`
-
-## Listener Handler Contract
-- handler is JavaScript source (function body) executed as: handler(payload, api, widget).
-- payload has: event, target, value, widgetRoot.
-- api exposes:
-  - getGanttConfig(), setGanttConfig(nextConfig), applyGanttConfigPatch(base, patch)
-  - setProcessSortMode(mode)
-  - getTracksConfig(), setTracksConfig(nextConfig)
-  - setViewRange({ start, end })
-  - setYAxisWidth(px)
-  - setIsDrawingMode(boolean), setBrushSize(number), setBrushColor(color)
 
 ## Widget Layout & Style Config Sheet
 You can update layout/style using action "update_widget_config":
@@ -150,17 +289,6 @@ You can update layout/style using action "update_widget_config":
         "padding": "16px 20px",
         "borderRadius": 8,
         "boxShadow": "0 2px 8px rgba(0,0,0,0.1)"
-      },
-      "widgetCard": {
-        "background": "#f8fafc",
-        "border": "1px solid #e2e8f0",
-        "borderRadius": 8,
-        "padding": "12px 14px"
-      },
-      "widgetTitle": {
-        "fontSize": 13,
-        "fontWeight": 600,
-        "color": "#1f2937"
       }
     }
   },
@@ -168,22 +296,62 @@ You can update layout/style using action "update_widget_config":
 }
 \`\`\`
 
-## Example: Sort Widget (current UI behavior)
+## EXAMPLE: Color Toggle Widget (CORRECT - compact inline style)
+\`\`\`json
+{
+  "action": "create_widget",
+  "widget": {
+    "id": "color-toggle",
+    "name": "Color",
+    "html": "<select id=\\"color-mode\\"><option value=\\"default\\">Default</option><option value=\\"black\\">Black</option><option value=\\"gray\\">Gray</option></select>",
+    "listeners": [
+      {
+        "selector": "#color-mode",
+        "event": "change",
+        "handler": "const mode = payload.value; let patch; if (mode === 'black') { patch = { color: { fixedColor: 'rgba(0,0,0,0.38)' } }; } else if (mode === 'gray') { patch = { color: { fixedColor: '#6b7280' } }; } else { patch = { color: { fixedColor: null } }; } api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), patch));"
+      }
+    ],
+    "description": "Switches bar colors between default palette and fixed colors."
+  }
+}
+\`\`\`
+
+## EXAMPLE: Sort Widget (compact)
 \`\`\`json
 {
   "action": "create_widget",
   "widget": {
     "id": "sort-widget",
     "name": "Sort",
-    "html": "<label for=\\"sort-mode\\">Sort</label><select id=\\"sort-mode\\"><option value=\\"fork\\">Fork (tree)</option><option value=\\"default\\">Default</option></select>",
+    "html": "<select id=\\"sort-mode\\"><option value=\\"fork\\">Fork Tree</option><option value=\\"default\\">Default</option></select>",
     "listeners": [
       {
         "selector": "#sort-mode",
         "event": "change",
-        "handler": "const mode = payload.value || 'fork'; api.setProcessSortMode(mode); api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), { \\"yAxis\\": { \\"orderMode\\": mode === \\"fork\\" ? \\"fork\\" : \\"default\\" } }));"
+        "handler": "const mode = payload.value || 'fork'; api.setProcessSortMode(mode); const rule = mode === 'fork' ? { type: 'transform', name: 'forkTree', params: { includeUnspecified: true } } : { type: 'transform', name: 'pidAsc' }; api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), { yAxis: { processOrderRule: rule } }));"
       }
     ],
     "description": "Switches process ordering between fork-tree and default."
+  }
+}
+\`\`\`
+
+## EXAMPLE: Opacity Slider
+\`\`\`json
+{
+  "action": "create_widget",
+  "widget": {
+    "id": "opacity-slider",
+    "name": "Opacity",
+    "html": "<input type=\\"range\\" id=\\"opacity\\" min=\\"10\\" max=\\"100\\" value=\\"100\\" /><span id=\\"opacity-val\\">100%</span>",
+    "listeners": [
+      {
+        "selector": "#opacity",
+        "event": "input",
+        "handler": "const val = parseInt(payload.value); widget.querySelector('#opacity-val').textContent = val + '%'; const alpha = val / 100; api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), { color: { fixedColor: 'rgba(59,130,246,' + alpha + ')' } }));"
+      }
+    ],
+    "description": "Adjusts bar opacity with a slider."
   }
 }
 \`\`\`

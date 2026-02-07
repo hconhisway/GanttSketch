@@ -3,7 +3,9 @@ import * as d3 from 'd3';
 import './App.css';
 import { streamLLMResponse } from './llmConfig';
 import { GANTT_CONFIG, cloneGanttConfig, applyGanttConfigPatch } from './ganttConfig';
+import { GANTT_CONFIG_UI_SPEC } from './ganttConfigUiSpec';
 import { cloneWidgetConfig, applyWidgetConfigPatch } from './widgetConfig';
+import { validateWidget } from './widgetValidator';
 import { GanttDrawingOverlay, DrawingControls } from './GanttDrawingOverlay';
 import { 
   getEnhancedSystemPrompt, 
@@ -11,6 +13,11 @@ import {
   convertLLMConfigToTracksConfig 
 } from './tracksConfigPrompt';
 import { getWidgetSystemPrompt } from './widgetAgentPrompt';
+import {
+  analyzeAndInitialize,
+  buildSystemPrompt,
+  extractTargetPath
+} from './agents';
 
 // API configuration
 const API_URL = "http://127.0.0.1:8080/get-events";
@@ -18,6 +25,51 @@ const FRONTEND_TRACE_URL = `${process.env.PUBLIC_URL || ''}/unet3d_a100--verify-
 const FRONTEND_TRACE_LABEL = 'unet3d_a100--verify-1.pfw';
 const DEFAULT_END_US = 100_000_000; // 100s, microseconds
 const MERGE_GAP_RATIO = 0.01; // merge gap as fraction of total time window
+const FLAT_CONFIG_ITEMS = GANTT_CONFIG_UI_SPEC.flatMap((domain) => domain.items);
+
+function findConfigItemForPatch(patch) {
+  if (!patch || typeof patch !== 'object') return null;
+  const matches = FLAT_CONFIG_ITEMS
+    .map((item) => ({
+      item,
+      value: getValueAtPath(patch, item.path)
+    }))
+    .filter((entry) => entry.value !== undefined);
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => b.item.path.split('.').length - a.item.path.split('.').length);
+  return matches[0].item;
+}
+
+function parseMessageSegments(content) {
+  const text = String(content ?? '');
+  if (!text.includes('```')) {
+    return [{ type: 'text', content: text }];
+  }
+  const segments = [];
+  const fenceRegex = /```([a-zA-Z0-9_-]+)?\n?([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = fenceRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({
+        type: 'text',
+        content: text.slice(lastIndex, match.index)
+      });
+    }
+    const rawCode = match[2] ?? '';
+    const code = rawCode.replace(/^\n/, '').replace(/\n$/, '');
+    segments.push({
+      type: 'code',
+      language: match[1] || '',
+      content: code
+    });
+    lastIndex = fenceRegex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    segments.push({ type: 'text', content: text.slice(lastIndex) });
+  }
+  return segments;
+}
 
 function formatTimeUs(us) {
   const safe = Number(us);
@@ -59,6 +111,26 @@ function formatDurationUs(us) {
   if (ms) parts.push(`${ms}ms`);
   if (micros || parts.length === 0) parts.push(`${micros}µs`);
   return parts.join(' ');
+}
+
+function extractEventFieldPaths(events, maxFields = 60) {
+  if (!Array.isArray(events) || events.length === 0) return [];
+  const sample = events.slice(0, 50);
+  const fields = new Set();
+
+  const walk = (obj, prefix = '', depth = 0) => {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+    if (depth > 2) return;
+    Object.keys(obj).forEach((key) => {
+      const next = prefix ? `${prefix}.${key}` : key;
+      fields.add(next);
+      walk(obj[key], next, depth + 1);
+    });
+  };
+
+  sample.forEach((event) => walk(event));
+
+  return Array.from(fields).slice(0, maxFields);
 }
 
 function escapeHtml(value) {
@@ -190,7 +262,148 @@ function pickFirstFieldValue(item, fields) {
   return undefined;
 }
 
-function resolveColorKey(item, trackKey, trackMeta, colorConfig) {
+function isEmptyValue(value) {
+  return value === undefined || value === null || value === '';
+}
+
+function evalExpr(expr, ctx) {
+  if (expr === undefined || expr === null) return undefined;
+  if (typeof expr !== 'object') return expr;
+  if (Array.isArray(expr)) return expr.map((item) => evalExpr(item, ctx));
+  if (expr.type === 'expr') return evalExpr(expr.expr, ctx);
+  const op = expr.op;
+  if (!op) return expr;
+
+  const args = Array.isArray(expr.args) ? expr.args : [];
+  const evalArg = (index) => evalExpr(args[index], ctx);
+  const evalArgs = () => args.map((item) => evalExpr(item, ctx));
+
+  switch (op) {
+    case 'var': {
+      const name = expr.name;
+      if (ctx && Object.prototype.hasOwnProperty.call(ctx, name)) return ctx[name];
+      if (ctx?.vars && Object.prototype.hasOwnProperty.call(ctx.vars, name)) return ctx.vars[name];
+      return undefined;
+    }
+    case 'get': {
+      const path = expr.path;
+      const fromKey = expr.from;
+      const base = fromKey ? ctx?.[fromKey] : ctx;
+      return getValueAtPath(base, path);
+    }
+    case 'coalesce': {
+      for (const item of args) {
+        const value = evalExpr(item, ctx);
+        if (!isEmptyValue(value)) return value;
+      }
+      return undefined;
+    }
+    case 'concat': {
+      return evalArgs().map((v) => (v === null || v === undefined ? '' : String(v))).join('');
+    }
+    case 'lower':
+      return String(evalArg(0) ?? '').toLowerCase();
+    case 'upper':
+      return String(evalArg(0) ?? '').toUpperCase();
+    case 'trim':
+      return String(evalArg(0) ?? '').trim();
+    case 'len': {
+      const value = evalArg(0);
+      if (Array.isArray(value) || typeof value === 'string') return value.length;
+      return 0;
+    }
+    case 'if': {
+      const cond = Boolean(evalArg(0));
+      return cond ? evalArg(1) : evalArg(2);
+    }
+    case 'case': {
+      const cases = Array.isArray(expr.cases) ? expr.cases : [];
+      for (const entry of cases) {
+        if (!Array.isArray(entry) || entry.length < 2) continue;
+        if (Boolean(evalExpr(entry[0], ctx))) return evalExpr(entry[1], ctx);
+      }
+      return evalExpr(expr.else, ctx);
+    }
+    case '==':
+      return evalArg(0) === evalArg(1);
+    case '!=':
+      return evalArg(0) !== evalArg(1);
+    case '>':
+      return Number(evalArg(0)) > Number(evalArg(1));
+    case '>=':
+      return Number(evalArg(0)) >= Number(evalArg(1));
+    case '<':
+      return Number(evalArg(0)) < Number(evalArg(1));
+    case '<=':
+      return Number(evalArg(0)) <= Number(evalArg(1));
+    case 'and':
+      return evalArgs().every(Boolean);
+    case 'or':
+      return evalArgs().some(Boolean);
+    case 'not':
+      return !Boolean(evalArg(0));
+    case 'add':
+      return evalArgs().reduce((sum, v) => sum + Number(v || 0), 0);
+    case 'sub':
+      return Number(evalArg(0) || 0) - Number(evalArg(1) || 0);
+    case 'mul':
+      return evalArgs().reduce((product, v) => product * Number(v || 0), 1);
+    case 'div': {
+      const denom = Number(evalArg(1) || 0);
+      if (denom === 0) return 0;
+      return Number(evalArg(0) || 0) / denom;
+    }
+    case 'clamp':
+      return clampNumber(evalArg(0), evalArg(1), evalArg(2));
+    case 'regexTest': {
+      const value = String(evalArg(0) ?? '');
+      const pattern = expr.pattern ?? evalArg(1);
+      try {
+        return new RegExp(pattern).test(value);
+      } catch {
+        return false;
+      }
+    }
+    case 'regexCapture': {
+      const value = String(evalArg(0) ?? '');
+      const pattern = expr.pattern ?? evalArg(1);
+      const groupIndex = Number(expr.group ?? evalArg(2) ?? 1);
+      try {
+        const match = value.match(new RegExp(pattern));
+        return match ? match[groupIndex] : '';
+      } catch {
+        return '';
+      }
+    }
+    case 'hash':
+      return hashStringToInt(evalArg(0));
+    case 'paletteHash': {
+      const key = evalArg(0);
+      const palette = evalArg(1);
+      if (!Array.isArray(palette) || palette.length === 0) return '';
+      const hash = hashStringToInt(key);
+      return palette[hash % palette.length];
+    }
+    case 'formatTimeUs':
+      return formatTimeUs(evalArg(0));
+    case 'formatTimeUsFull':
+      return formatTimeUsFull(evalArg(0));
+    case 'formatDurationUs':
+      return formatDurationUs(evalArg(0));
+    default:
+      return undefined;
+  }
+}
+
+function evalPredicate(rule, ctx) {
+  if (!rule) return false;
+  if (rule.type === 'predicate') return Boolean(evalExpr(rule.when, ctx));
+  if (rule.type === 'expr') return Boolean(evalExpr(rule.expr, ctx));
+  if (rule.op) return Boolean(evalExpr(rule, ctx));
+  return Boolean(rule);
+}
+
+function resolveColorKeyLegacy(item, trackKey, trackMeta, colorConfig) {
   const mode = colorConfig?.mode || 'byField';
   let keyValue;
 
@@ -202,11 +415,11 @@ function resolveColorKey(item, trackKey, trackMeta, colorConfig) {
     keyValue = pickFirstFieldValue(item, colorConfig?.fields);
   }
 
-  if (keyValue === undefined || keyValue === null || keyValue === '') {
+  if (isEmptyValue(keyValue)) {
     keyValue = pickFirstFieldValue(item, colorConfig?.fallbackFields);
   }
 
-  if (keyValue === undefined || keyValue === null || keyValue === '') {
+  if (isEmptyValue(keyValue)) {
     const fallbackKey = trackMeta?.type === 'process'
       ? (item?.pid ?? trackMeta?.pid ?? trackKey ?? '')
       : `${item?.tid ?? trackMeta?.tid ?? trackKey}-${item?.level ?? trackMeta?.level ?? 0}`;
@@ -216,16 +429,500 @@ function resolveColorKey(item, trackKey, trackMeta, colorConfig) {
   return String(keyValue ?? '');
 }
 
-function resolveColor(item, trackKey, trackMeta, colorConfig, defaultPalette) {
-  if (colorConfig?.mode === 'fixed' && colorConfig?.fixedColor) {
-    return colorConfig.fixedColor;
+function resolveColorKey(item, trackKey, trackMeta, colorConfig, legacyColorConfig) {
+  if (colorConfig?.keyRule) {
+    const key = evalExpr(colorConfig.keyRule, {
+      event: item,
+      trackKey,
+      trackMeta,
+      pid: item?.pid ?? trackMeta?.pid,
+      tid: item?.tid ?? trackMeta?.tid,
+      level: item?.level ?? trackMeta?.level
+    });
+    if (!isEmptyValue(key)) return String(key);
   }
+  if (legacyColorConfig) {
+    return resolveColorKeyLegacy(item, trackKey, trackMeta, legacyColorConfig);
+  }
+  const fallbackKey = trackMeta?.type === 'process'
+    ? (item?.pid ?? trackMeta?.pid ?? trackKey ?? '')
+    : `${item?.tid ?? trackMeta?.tid ?? trackKey}-${item?.level ?? trackMeta?.level ?? 0}`;
+  return String(fallbackKey ?? '');
+}
+
+function resolveColor(item, trackKey, trackMeta, colorConfig, defaultPalette, legacyColorConfig, processStats) {
   const palette = Array.isArray(colorConfig?.palette) && colorConfig.palette.length > 0
     ? colorConfig.palette
     : defaultPalette;
-  const key = resolveColorKey(item, trackKey, trackMeta, colorConfig);
-  const hash = hashStringToInt(key);
+  const colorKey = resolveColorKey(item, trackKey, trackMeta, colorConfig, legacyColorConfig);
+  if (colorConfig?.fixedColor) {
+    return colorConfig.fixedColor;
+  }
+  if (colorConfig?.colorRule) {
+    const stats = processStats?.get(String(item?.pid ?? trackMeta?.pid)) || {};
+    const resolved = evalExpr(colorConfig.colorRule, {
+      event: item,
+      trackKey,
+      trackMeta,
+      pid: item?.pid ?? trackMeta?.pid,
+      tid: item?.tid ?? trackMeta?.tid,
+      level: item?.level ?? trackMeta?.level,
+      stats,
+      colorKey,
+      palette,
+      vars: { colorKey, palette }
+    });
+    if (!isEmptyValue(resolved)) return String(resolved);
+  }
+  const hash = hashStringToInt(colorKey);
   return palette[hash % palette.length];
+}
+
+function comparePid(a, b) {
+  const na = parseFloat(a);
+  const nb = parseFloat(b);
+  if (!isNaN(na) && !isNaN(nb)) return na - nb;
+  return String(a).localeCompare(String(b));
+}
+
+function buildProcessStats(events) {
+  const stats = new Map();
+  if (!Array.isArray(events)) return stats;
+  events.forEach((ev) => {
+    const pid = ev?.pid;
+    if (pid === undefined || pid === null) return;
+    const key = String(pid);
+    const start = Number(ev.start ?? ev.timeStart ?? 0);
+    const end = Number(ev.end ?? ev.timeEnd ?? 0);
+    const duration = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : 0;
+    const entry = stats.get(key) || {
+      pid: key,
+      count: 0,
+      totalDurUs: 0,
+      maxDurUs: 0,
+      minStart: Number.POSITIVE_INFINITY,
+      maxEnd: 0
+    };
+    entry.count += 1;
+    entry.totalDurUs += duration;
+    entry.maxDurUs = Math.max(entry.maxDurUs, duration);
+    entry.minStart = Math.min(entry.minStart, start);
+    entry.maxEnd = Math.max(entry.maxEnd, end);
+    stats.set(key, entry);
+  });
+  stats.forEach((entry) => {
+    entry.avgDurUs = entry.count > 0 ? entry.totalDurUs / entry.count : 0;
+    if (!Number.isFinite(entry.minStart)) entry.minStart = 0;
+  });
+  return stats;
+}
+
+function normalizeProcessOrderRule(yAxisConfig, fallbackMode) {
+  if (yAxisConfig?.processOrderRule) return yAxisConfig.processOrderRule;
+  const legacyMode = yAxisConfig?.orderMode || fallbackMode;
+  const includeUnspecified = yAxisConfig?.includeUnspecified !== false;
+  if (legacyMode === 'fork') {
+    return { type: 'transform', name: 'forkTree', params: { includeUnspecified } };
+  }
+  if (legacyMode === 'custom') {
+    return {
+      type: 'transform',
+      name: 'customList',
+      params: { list: yAxisConfig?.customOrder || [], includeUnspecified }
+    };
+  }
+  if (legacyMode === 'grouped') {
+    return {
+      type: 'transform',
+      name: 'groupList',
+      params: { groups: yAxisConfig?.groups || [], includeUnspecified }
+    };
+  }
+  return { type: 'transform', name: 'pidAsc' };
+}
+
+function inferProcessSortModeFromRule(rule) {
+  if (!rule) return 'default';
+  if (rule?.type === 'transform' && rule?.name === 'forkTree') return 'fork';
+  if (rule?.type === 'transform' && rule?.name === 'pipeline') {
+    const steps = Array.isArray(rule?.params?.steps) ? rule.params.steps : [];
+    if (steps.some(step => step?.name === 'forkTree')) return 'fork';
+  }
+  return 'default';
+}
+
+function resolveThreadLaneMode(rule, fallbackMode) {
+  if (rule?.type === 'transform' || rule?.name) {
+    if (rule.name === 'byLevel') return 'level';
+    if (rule.name === 'autoPack') return 'auto';
+  }
+  if (fallbackMode === 'level' || fallbackMode === 'auto') return fallbackMode;
+  return 'auto';
+}
+
+function applyProcessOrderRule(rule, ctx) {
+  const baseOrder = ctx?.pids ? ctx.pids.map(String) : [];
+  let ordered = [...baseOrder];
+  let depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+  if (!rule) return { orderedPids: ordered, depthByPid };
+
+  const getRuleName = (step) => step?.name || step?.op || step?.type;
+  const ruleParams = (step) => step?.params || {};
+
+  const compareByRule = (ruleExpr, order = 'asc') => (a, b) => {
+    const ctxA = { pid: a, stats: ctx.processStats?.get(String(a)) || {}, vars: { pid: a } };
+    const ctxB = { pid: b, stats: ctx.processStats?.get(String(b)) || {}, vars: { pid: b } };
+    const va = evalExpr(ruleExpr, ctxA);
+    const vb = evalExpr(ruleExpr, ctxB);
+    let cmp = 0;
+    if (Number.isFinite(Number(va)) && Number.isFinite(Number(vb))) {
+      cmp = Number(va) - Number(vb);
+    } else {
+      cmp = String(va ?? '').localeCompare(String(vb ?? ''));
+    }
+    if (cmp === 0) {
+      cmp = comparePid(a, b);
+    }
+    return order === 'desc' ? -cmp : cmp;
+  };
+
+  const applyStep = (step) => {
+    if (!step) return;
+    const name = getRuleName(step);
+    const params = ruleParams(step);
+    if (name === 'pidAsc') {
+      ordered = [...ordered].sort(comparePid);
+      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      return;
+    }
+    if (name === 'pidDesc') {
+      ordered = [...ordered].sort((a, b) => -comparePid(a, b));
+      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      return;
+    }
+    if (name === 'filter') {
+      const when = params.when || step.when;
+      ordered = ordered.filter((pid) => evalPredicate(when, {
+        pid,
+        stats: ctx.processStats?.get(String(pid)) || {},
+        vars: { pid }
+      }));
+      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      return;
+    }
+    if (name === 'customList') {
+      const list = Array.isArray(params.list) ? params.list.map(String) : [];
+      const includeUnspecified = params.includeUnspecified !== false;
+      const baseSet = new Set(baseOrder);
+      const nextOrdered = [];
+      const used = new Set();
+      list.forEach((pid) => {
+        if (baseSet.has(pid) && !used.has(pid)) {
+          nextOrdered.push(pid);
+          used.add(pid);
+        }
+      });
+      if (includeUnspecified) {
+        baseOrder.forEach((pid) => {
+          if (!used.has(pid)) {
+            nextOrdered.push(pid);
+            used.add(pid);
+          }
+        });
+      }
+      ordered = nextOrdered.length > 0 ? nextOrdered : baseOrder;
+      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      return;
+    }
+    if (name === 'groupList') {
+      const groups = Array.isArray(params.groups) ? params.groups : [];
+      const includeUnspecified = params.includeUnspecified !== false;
+      const baseSet = new Set(baseOrder);
+      const nextOrdered = [];
+      const used = new Set();
+      const sortedGroups = [...groups].sort((a, b) => (a.order || 0) - (b.order || 0));
+      sortedGroups.forEach((group) => {
+        const groupPids = group?.pids || group?.tracks || group?.items || [];
+        groupPids.forEach((pid) => {
+          const key = String(pid);
+          if (baseSet.has(key) && !used.has(key)) {
+            nextOrdered.push(key);
+            used.add(key);
+          }
+        });
+      });
+      if (includeUnspecified) {
+        baseOrder.forEach((pid) => {
+          if (!used.has(pid)) {
+            nextOrdered.push(pid);
+            used.add(pid);
+          }
+        });
+      }
+      ordered = nextOrdered.length > 0 ? nextOrdered : baseOrder;
+      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      return;
+    }
+    if (name === 'sortBy') {
+      const keyRule = params.key || step.key;
+      const order = params.order || 'asc';
+      ordered = [...ordered].sort(compareByRule(keyRule, order));
+      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      return;
+    }
+    if (name === 'groupBy') {
+      const keyRule = params.key || step.key;
+      const order = params.order || 'asc';
+      const includeUnspecified = params.includeUnspecified !== false;
+      const groupMap = new Map();
+      ordered.forEach((pid) => {
+        const key = evalExpr(keyRule, {
+          pid,
+          stats: ctx.processStats?.get(String(pid)) || {},
+          vars: { pid }
+        });
+        if (isEmptyValue(key)) {
+          if (!includeUnspecified) return;
+        }
+        const groupKey = isEmptyValue(key) ? '__unspecified__' : String(key);
+        if (!groupMap.has(groupKey)) groupMap.set(groupKey, []);
+        groupMap.get(groupKey).push(pid);
+      });
+      const groupKeys = Array.from(groupMap.keys());
+      groupKeys.sort((a, b) => {
+        const cmp = String(a).localeCompare(String(b));
+        return order === 'desc' ? -cmp : cmp;
+      });
+      ordered = groupKeys.flatMap((k) => groupMap.get(k));
+      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      return;
+    }
+    if (name === 'forkTree') {
+      const includeUnspecified = params.includeUnspecified !== false;
+      const tieBreak = params.tieBreak;
+      const canonicalIndex = new Map(baseOrder.map((pid, i) => [String(pid), i]));
+      const existingPids = new Set(baseOrder.map((pid) => String(pid)));
+
+      const fork = ctx.fork;
+      const parentByPidExisting = new Map();
+      const childrenByPidExisting = new Map();
+      if (fork && fork.parentByPid instanceof Map) {
+        for (const pid of existingPids) {
+          const ppid = fork.parentByPid.get(pid);
+          if (!ppid) continue;
+          const ppidStr = String(ppid);
+          if (!existingPids.has(ppidStr)) continue;
+          if (ppidStr === pid) continue;
+          parentByPidExisting.set(pid, ppidStr);
+          if (!childrenByPidExisting.has(ppidStr)) childrenByPidExisting.set(ppidStr, []);
+          childrenByPidExisting.get(ppidStr).push(pid);
+        }
+      }
+
+      const sortList = (list, parentPid) => {
+        if (!tieBreak) {
+          list.sort((a, b) => (canonicalIndex.get(a) ?? 0) - (canonicalIndex.get(b) ?? 0));
+          return;
+        }
+        list.sort((a, b) => {
+          const ctxA = {
+            pid: a,
+            parentPid,
+            stats: ctx.processStats?.get(String(a)) || {},
+            vars: { pid: a, parentPid }
+          };
+          const ctxB = {
+            pid: b,
+            parentPid,
+            stats: ctx.processStats?.get(String(b)) || {},
+            vars: { pid: b, parentPid }
+          };
+          const va = evalExpr(tieBreak, ctxA);
+          const vb = evalExpr(tieBreak, ctxB);
+          let cmp = 0;
+          if (Number.isFinite(Number(va)) && Number.isFinite(Number(vb))) {
+            cmp = Number(va) - Number(vb);
+          } else {
+            cmp = String(va ?? '').localeCompare(String(vb ?? ''));
+          }
+          if (cmp === 0) cmp = (canonicalIndex.get(a) ?? 0) - (canonicalIndex.get(b) ?? 0);
+          return cmp;
+        });
+      };
+
+      for (const [ppid, kids] of childrenByPidExisting.entries()) {
+        sortList(kids, ppid);
+        childrenByPidExisting.set(ppid, kids);
+      }
+
+      const roots = baseOrder
+        .map(String)
+        .filter((pid) => !parentByPidExisting.has(pid));
+      sortList(roots, null);
+
+      const nextOrdered = [];
+      const nextDepth = new Map();
+      const visited = new Set();
+      const dfs = (pid, depth) => {
+        if (!pid || visited.has(pid)) return;
+        visited.add(pid);
+        nextOrdered.push(pid);
+        nextDepth.set(pid, depth);
+        const kids = childrenByPidExisting.get(pid) || [];
+        for (const child of kids) dfs(child, depth + 1);
+      };
+      roots.forEach((pid) => dfs(pid, 0));
+      if (includeUnspecified) {
+        baseOrder.forEach((pid) => {
+          if (!visited.has(pid)) dfs(pid, 0);
+        });
+      }
+
+      ordered = nextOrdered.length > 0 ? nextOrdered : baseOrder;
+      depthByPid = nextDepth.size > 0 ? nextDepth : new Map(ordered.map((pid) => [pid, 0]));
+      return;
+    }
+  };
+
+  if (rule?.type === 'transform' && rule?.name === 'pipeline') {
+    const steps = Array.isArray(rule?.params?.steps) ? rule.params.steps : [];
+    steps.forEach((step) => applyStep(step));
+  } else {
+    applyStep(rule);
+  }
+
+  return { orderedPids: ordered, depthByPid };
+}
+
+function buildPatchForPath(path, value) {
+  if (!path) return {};
+  const parts = String(path).split('.').filter(Boolean);
+  if (parts.length === 0) return {};
+  const patch = {};
+  let cursor = patch;
+  parts.forEach((part, index) => {
+    if (index === parts.length - 1) {
+      cursor[part] = value;
+    } else {
+      cursor[part] = {};
+      cursor = cursor[part];
+    }
+  });
+  return patch;
+}
+
+
+function renderTooltipRows(fields, ctx) {
+  if (!Array.isArray(fields)) return '';
+  return fields.map((field, idx) => {
+    if (!field) return '';
+    const whenRule = field.when;
+    if (whenRule && !evalPredicate(whenRule, ctx)) return '';
+    const labelRaw = field.label ?? field.name ?? `Field ${idx + 1}`;
+    const valueRule = field.value ?? (field.path ? { op: 'get', path: field.path } : null);
+    const label = typeof labelRaw === 'object' ? evalExpr(labelRaw, ctx) : labelRaw;
+    const value = evalExpr(valueRule, ctx);
+    if (isEmptyValue(value) && field.showEmpty !== true) return '';
+    return `
+      <div class="tooltip-row">
+        <span class="tooltip-key">${escapeHtml(label ?? '')}:</span>
+        <span class="tooltip-value">${escapeHtml(value ?? '')}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function buildTooltipHtml(hit, tooltipConfig, ctx) {
+  if (!tooltipConfig || tooltipConfig.enabled === false) return '';
+  if (hit.area === 'process') {
+    const processConfig = tooltipConfig.process || {};
+    const rows = renderTooltipRows(processConfig.fields, ctx);
+    const title = processConfig.title ?? 'Process';
+    return `
+      <div class="tooltip-grid">
+        <div class="tooltip-col">
+          <div class="tooltip-title">${escapeHtml(title)}</div>
+          ${rows || `<div class="tooltip-muted">No fields</div>`}
+        </div>
+      </div>
+    `;
+  }
+
+  const eventConfig = tooltipConfig.event || {};
+  const rows = renderTooltipRows(eventConfig.fields, ctx);
+  const title = eventConfig.title ?? 'Details';
+  const argsConfig = eventConfig.args || {};
+  const argsEnabled = argsConfig.enabled !== false;
+  const argsLabel = argsConfig.label ?? 'Arguments';
+  const argsMax = Number.isFinite(Number(argsConfig.max)) ? Number(argsConfig.max) : 24;
+
+  let argsHtml = '';
+  let extraHtml = '';
+
+  if (argsEnabled) {
+    const argsObj = (ctx.event?.args && typeof ctx.event.args === 'object') ? ctx.event.args : {};
+    let entries = Object.entries(argsObj);
+    if (argsConfig.sort === 'alpha') {
+      entries = entries.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    }
+    if (argsConfig.filter) {
+      entries = entries.filter(([key, value]) => evalPredicate(argsConfig.filter, {
+        ...ctx,
+        argKey: key,
+        argValue: value,
+        vars: { ...(ctx.vars || {}), argKey: key, argValue: value }
+      }));
+    }
+    const shownArgs = entries.slice(0, Math.max(0, argsMax));
+    const remainingCount = Math.max(0, entries.length - shownArgs.length);
+    argsHtml = shownArgs.length > 0
+      ? shownArgs.map(([k, v]) => {
+        const valueRule = argsConfig.value || null;
+        const formattedValue = valueRule
+          ? evalExpr(valueRule, {
+              ...ctx,
+              argKey: k,
+              argValue: v,
+              vars: { ...(ctx.vars || {}), argKey: k, argValue: v }
+            })
+          : formatArgValue(v);
+        return `
+          <div class="tooltip-row">
+            <span class="tooltip-key">${escapeHtml(k)}:</span>
+            <span class="tooltip-value">${escapeHtml(formattedValue)}</span>
+          </div>
+        `;
+      }).join('')
+      : `<div class="tooltip-muted">No arguments</div>`;
+    extraHtml = remainingCount > 0
+      ? `<div class="tooltip-muted">… (+${remainingCount} more)</div>`
+      : '';
+  }
+
+  if (!argsEnabled) {
+    return `
+      <div class="tooltip-grid">
+        <div class="tooltip-col">
+          <div class="tooltip-title">${escapeHtml(title)}</div>
+          ${rows || `<div class="tooltip-muted">No fields</div>`}
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="tooltip-grid">
+      <div class="tooltip-col">
+        <div class="tooltip-title">${escapeHtml(title)}</div>
+        ${rows || `<div class="tooltip-muted">No fields</div>`}
+      </div>
+      <div class="tooltip-col">
+        <div class="tooltip-title">${escapeHtml(argsLabel)}</div>
+        ${argsHtml}
+        ${extraHtml}
+      </div>
+    </div>
+  `;
 }
 
 // Fetch data from API
@@ -517,7 +1214,8 @@ function buildProcessForkRelations(events) {
   return { parentByPid, childrenByPid, edges, conflicts, startEventCount, missingPpidCount };
 }
 
-// Transform raw data to normalized event list (microseconds, relative time starting at 0)
+// Transform raw data to event list (microseconds, relative time starting at 0)
+// Preserves ALL original fields while adding standard internal fields for chart rendering
 function transformData(rawData) {
   if (!rawData) return [];
 
@@ -543,7 +1241,11 @@ function transformData(rawData) {
         const end = Number(endCandidate);
         if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
 
+        // Preserve ALL original fields, then add/override with internal fields
         return {
+          ...raw,  // Preserve all original fields (ts, dur, etc.)
+          ...ev,   // Preserve wrapper fields if any
+          // Internal fields for chart rendering (these override if they exist in original)
           pid: String(pid),
           tid: String(tid),
           ppid,
@@ -565,6 +1267,9 @@ function transformData(rawData) {
       events.forEach((e) => {
         e.start -= minStart;
         e.end -= minStart;
+        // Also adjust original time fields if they exist (to maintain consistency)
+        if (typeof e.ts === 'number') e.ts -= minStart;
+        if (typeof e.timestamp === 'number') e.timestamp -= minStart;
       });
     }
 
@@ -754,6 +1459,8 @@ function App() {
   const drawingOverlayRef = useRef();
   const widgetAreaRef = useRef(null);
   const widgetHandlersRef = useRef([]);
+  const configEditorTextareaRef = useRef(null);
+  const configHighlightTimeoutRef = useRef(null);
   const ganttConfigRef = useRef(null);
   const tracksConfigRef = useRef(null);
   const widgetApiRef = useRef(null);
@@ -763,6 +1470,8 @@ function App() {
   const forkRelationsRef = useRef({ parentByPid: new Map(), childrenByPid: new Map(), edges: [] });
   const forkLoggedRef = useRef(false);
   const [data, setData] = useState([]);
+  const [dataSchema, setDataSchema] = useState(null); // Schema detected from data
+  const [fieldMapping, setFieldMapping] = useState(null); // Maps semantic roles to original field names
   const [loading, setLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
   const [error, setError] = useState(null);
@@ -774,7 +1483,9 @@ function App() {
   const [processAggregates, setProcessAggregates] = useState(new Map());
   const [threadsByPid, setThreadsByPid] = useState(new Map());
   const [expandedPids, setExpandedPids] = useState([]);
-  const [yAxisWidth, setYAxisWidth] = useState(180);
+  const [yAxisWidth, setYAxisWidth] = useState(
+    GANTT_CONFIG?.layout?.yAxis?.baseWidth ?? 180
+  );
   
   // Chat state
   const [messages, setMessages] = useState([]);
@@ -788,7 +1499,7 @@ function App() {
   const [brushColor, setBrushColor] = useState('#ff0000');
   const [ganttConfig, setGanttConfig] = useState(() => cloneGanttConfig());
   const [processSortMode, setProcessSortMode] = useState(
-    GANTT_CONFIG.yAxis?.orderMode === 'fork' ? 'fork' : 'default'
+    inferProcessSortModeFromRule(GANTT_CONFIG.yAxis?.processOrderRule)
   ); // 'fork' | 'default'
   const [localTraceText, setLocalTraceText] = useState('');
   const [localTraceName, setLocalTraceName] = useState('');
@@ -807,9 +1518,25 @@ function App() {
     trackList: null
   });
 
+  // Config UI editor state
+  const [activeConfigItem, setActiveConfigItem] = useState(null);
+  const [configEditorText, setConfigEditorText] = useState('');
+  const [configEditorError, setConfigEditorError] = useState('');
+  const [configHighlightId, setConfigHighlightId] = useState(null);
+
   // Widget configuration and instances
   const [widgetConfig, setWidgetConfig] = useState(() => cloneWidgetConfig());
   const [widgets, setWidgets] = useState([]);
+
+  // Widget agent mode toggle
+  const [isWidgetAgentMode, setIsWidgetAgentMode] = useState(false);
+
+  // Widget editor state (similar to config editor)
+  const [activeWidget, setActiveWidget] = useState(null);
+  const [widgetEditorText, setWidgetEditorText] = useState('');
+  const [widgetEditorError, setWidgetEditorError] = useState('');
+  const [widgetHighlightId, setWidgetHighlightId] = useState(null);
+  const widgetHighlightTimeoutRef = useRef(null);
 
   useEffect(() => {
     ganttConfigRef.current = ganttConfig;
@@ -898,7 +1625,35 @@ function App() {
           FRONTEND_TRACE_URL,
           localTraceText
         );
-        const transformed = transformData(rawData);
+        
+        // Process data - detect schema on first load, use existing mapping for subsequent loads
+        let transformed;
+        let analysisResult = null;
+        
+        // First time loading: detect schema and create field mapping
+        if (!dataSchema && Array.isArray(rawData?.events) && rawData.events.length > 0) {
+          try {
+            console.log('Running Data Analysis Agent for schema detection...');
+            analysisResult = await analyzeAndInitialize(rawData.events);
+            
+            if (analysisResult.events && analysisResult.events.length > 0) {
+              // Use processed events (original fields preserved, internal _start/_end added)
+              transformed = analysisResult.events;
+              console.log(`Processed ${transformed.length} events (original field names preserved)`);
+            } else {
+              // Fallback to legacy transform
+              console.log('Schema detection returned no events, using legacy transform');
+              transformed = transformData(rawData);
+            }
+          } catch (err) {
+            console.error('Schema detection failed, using legacy transform:', err);
+            transformed = transformData(rawData);
+          }
+        } else {
+          // Subsequent loads: use legacy transform (schema already detected)
+          // TODO: Apply existing fieldMapping to new data
+          transformed = transformData(rawData);
+        }
 
         // Build pid fork relations from raw events first (start events may be instantaneous and
         // get filtered out by transformData, so using transformed alone can miss forks).
@@ -1003,6 +1758,36 @@ function App() {
         }
 
         setData(transformed);
+        
+        // Apply analysis results if we detected schema on this load
+        if (analysisResult && analysisResult.schema && analysisResult.schema.fields && !dataSchema) {
+          setDataSchema(analysisResult.schema);
+          setFieldMapping(analysisResult.fieldMapping);
+          console.log('Data schema detected:', analysisResult.schema);
+          console.log('Field mapping:', analysisResult.fieldMapping);
+          
+          // Apply initial config if one was generated
+          if (analysisResult.config && Object.keys(analysisResult.config).length > 0) {
+            console.log('Applying initial config:', analysisResult.config);
+            const nextConfig = applyGanttConfigPatch(ganttConfig, analysisResult.config);
+            setGanttConfig(nextConfig);
+            
+            // Update process sort mode if yAxis config was changed
+            if (analysisResult.config.yAxis?.processOrderRule) {
+              setProcessSortMode(
+                inferProcessSortModeFromRule(analysisResult.config.yAxis.processOrderRule)
+              );
+            }
+            
+            setMessages(prev => [
+              ...prev,
+              {
+                role: 'system',
+                content: `Info: Data schema auto-detected with ${analysisResult.schema.fields.length} fields. Initial configuration applied.`
+              }
+            ]);
+          }
+        }
         
         // Auto-fit time range (slider max) to real data end (max event end), when we are viewing the full current range.
         if (transformed && transformed.length > 0) {
@@ -1159,12 +1944,6 @@ function App() {
     if (!chartRef.current) return;
 
     const container = chartRef.current;
-    const margin = { top: 24, right: 24, bottom: 24, left: 16 };
-    const headerHeight = 24;          // process header row height
-    const laneHeight = 18;            // per (tid, level) lane height inside expanded process
-    const lanePadding = 3;
-    const expandedPadding = 8;        // padding inside expanded process block
-    const threadGap = 6;              // gap between different threads inside expanded block
     const pixelRatio = window.devicePixelRatio || 1;
 
     const renderChart = () => {
@@ -1182,124 +1961,68 @@ function App() {
       // - Collapsed: show merged bars (processAggregates)
       // - Expanded: the same process row grows into a detail box, showing thread→level lanes
       //   (levels are compacted: missing levels do NOT create empty rows).
+      const layoutConfig = ganttConfig?.layout || {};
+      const yAxisLayout = layoutConfig?.yAxis || {};
+      const margin = {
+        top: layoutConfig?.margin?.top ?? 24,
+        right: layoutConfig?.margin?.right ?? 24,
+        bottom: layoutConfig?.margin?.bottom ?? 24,
+        left: layoutConfig?.margin?.left ?? 16
+      };
+      const headerHeight = layoutConfig?.headerHeight ?? 24;
+      const laneHeight = layoutConfig?.laneHeight ?? 18;
+      const lanePadding = layoutConfig?.lanePadding ?? 3;
+      const expandedPadding = layoutConfig?.expandedPadding ?? 8;
+      const threadGap = layoutConfig?.threadGap ?? 6;
+
       const yAxisConfig = ganttConfig?.yAxis || {};
-      const yAxisOrderMode = yAxisConfig.orderMode || processSortMode;
-      const threadOrderModeRaw = yAxisConfig?.thread?.orderMode;
-      const threadOrderMode = (threadOrderModeRaw === 'level' || threadOrderModeRaw === 'auto')
-        ? threadOrderModeRaw
-        : 'auto';
-      const PROCESS_INDENT_PX = yAxisOrderMode === 'fork' ? 16 : 0;
+      const processOrderRule = normalizeProcessOrderRule(yAxisConfig, processSortMode);
+      const threadOrderMode = resolveThreadLaneMode(yAxisConfig?.threadLaneRule, yAxisConfig?.thread?.orderMode);
+      const PROCESS_INDENT_PX = yAxisLayout?.processIndent ?? 16;
 
       const pids = Array.from(processAggregates.keys());
       if (pids.length === 0) {
         container.innerHTML = `<div class="chart-empty-state">No processes found</div>`;
         return;
       }
-      pids.sort((a, b) => {
-        const na = parseFloat(a);
-        const nb = parseFloat(b);
-        if (!isNaN(na) && !isNaN(nb)) return na - nb;
-        return a.toString().localeCompare(b.toString());
+      pids.sort(comparePid);
+
+      const processStats = buildProcessStats(data);
+      const orderResult = applyProcessOrderRule(processOrderRule, {
+        pids,
+        fork: forkRelationsRef.current,
+        processStats
       });
+      let orderedPids = orderResult.orderedPids;
+      let depthByPid = orderResult.depthByPid;
 
-      let orderedPids = pids.map(String);
-      let depthByPid = new Map(orderedPids.map((pid) => [pid, 0]));
+      const processLabelRule = yAxisConfig?.processLabelRule;
+      const threadLabelRule = yAxisConfig?.threadLabelRule;
 
-      if (yAxisOrderMode === 'fork') {
-        // Reorder pids into fork-tree order and compute indent (depth), skipping fork edges
-        // that reference pids not present in the current dataset.
-        const canonicalIndex = new Map(pids.map((pid, i) => [String(pid), i]));
-        const existingPids = new Set(pids.map((pid) => String(pid)));
-
-        const fork = forkRelationsRef.current;
-        const parentByPidExisting = new Map();   // pid -> ppid (only if ppid exists)
-        const childrenByPidExisting = new Map(); // ppid -> [pid...]
-        if (fork && fork.parentByPid instanceof Map) {
-          for (const pid of existingPids) {
-            const ppid = fork.parentByPid.get(pid);
-            if (!ppid) continue;
-            const ppidStr = String(ppid);
-            if (!existingPids.has(ppidStr)) continue; // skip missing parent
-            if (ppidStr === pid) continue;
-            parentByPidExisting.set(pid, ppidStr);
-            if (!childrenByPidExisting.has(ppidStr)) childrenByPidExisting.set(ppidStr, []);
-            childrenByPidExisting.get(ppidStr).push(pid);
-          }
-        }
-
-        // Deterministic order: preserve canonical pid ordering inside each sibling list.
-        for (const [ppid, kids] of childrenByPidExisting.entries()) {
-          kids.sort((a, b) => (canonicalIndex.get(a) ?? 0) - (canonicalIndex.get(b) ?? 0));
-          childrenByPidExisting.set(ppid, kids);
-        }
-
-        const roots = pids
-          .map(String)
-          .filter((pid) => !parentByPidExisting.has(pid));
-        roots.sort((a, b) => (canonicalIndex.get(a) ?? 0) - (canonicalIndex.get(b) ?? 0));
-
-        const nextOrdered = [];
-        const nextDepth = new Map();
-        const visitedPids = new Set();
-        const dfs = (pid, depth) => {
-          if (!pid || visitedPids.has(pid)) return;
-          visitedPids.add(pid);
-          nextOrdered.push(pid);
-          nextDepth.set(pid, depth);
-          const kids = childrenByPidExisting.get(pid) || [];
-          for (const child of kids) dfs(child, depth + 1);
+      const getProcessLabel = (pid, depth, isExpanded) => {
+        const ctx = {
+          pid: String(pid),
+          depth,
+          isExpanded,
+          stats: processStats.get(String(pid)) || {},
+          vars: { pid: String(pid), depth, isExpanded }
         };
-        for (const r of roots) dfs(r, 0);
-        // Include any leftover pids (cycles/disconnected): treat as roots
-        for (const pid of pids.map(String)) {
-          if (!visitedPids.has(pid)) dfs(pid, 0);
-        }
+        const label = evalExpr(processLabelRule, ctx);
+        if (!isEmptyValue(label)) return String(label);
+        return `${isExpanded ? '▼' : '▶'} Process ${pid}`;
+      };
 
-        orderedPids = nextOrdered;
-        depthByPid = nextDepth;
-      } else if (yAxisOrderMode === 'custom' || yAxisOrderMode === 'grouped') {
-        const baseOrder = pids.map(String);
-        const baseSet = new Set(baseOrder);
-        const nextOrdered = [];
-        const used = new Set();
-
-        if (yAxisOrderMode === 'custom') {
-          const customOrder = Array.isArray(yAxisConfig.customOrder) ? yAxisConfig.customOrder : [];
-          customOrder.forEach((pid) => {
-            const key = String(pid);
-            if (baseSet.has(key) && !used.has(key)) {
-              nextOrdered.push(key);
-              used.add(key);
-            }
-          });
-        } else {
-          const groups = Array.isArray(yAxisConfig.groups) ? yAxisConfig.groups : [];
-          const sortedGroups = [...groups].sort((a, b) => (a.order || 0) - (b.order || 0));
-          sortedGroups.forEach((group) => {
-            const groupPids = group?.pids || group?.tracks || group?.items || [];
-            groupPids.forEach((pid) => {
-              const key = String(pid);
-              if (baseSet.has(key) && !used.has(key)) {
-                nextOrdered.push(key);
-                used.add(key);
-              }
-            });
-          });
-        }
-
-        const includeUnspecified = yAxisConfig.includeUnspecified !== false;
-        if (includeUnspecified) {
-          baseOrder.forEach((pid) => {
-            if (!used.has(pid)) {
-              nextOrdered.push(pid);
-              used.add(pid);
-            }
-          });
-        }
-
-        orderedPids = nextOrdered.length > 0 ? nextOrdered : baseOrder;
-        depthByPid = new Map(orderedPids.map((pid) => [pid, 0]));
-      }
+      const getThreadLabel = (pid, tid, isMainThread) => {
+        const ctx = {
+          pid: String(pid),
+          tid: String(tid),
+          isMainThread,
+          vars: { pid: String(pid), tid: String(tid), isMainThread }
+        };
+        const label = evalExpr(threadLabelRule, ctx);
+        if (!isEmptyValue(label)) return String(label);
+        return isMainThread ? 'main thread' : `thread ${tid}`;
+      };
 
       // Auto-size the left y-axis column to reduce wasted space.
       // We measure the widest visible label and add padding.
@@ -1309,23 +2032,23 @@ function App() {
           const ctx = canvas.getContext('2d');
           if (!ctx) return null;
 
-          const LEFT_PAD = 8;
-          const RIGHT_PAD = 12;
-          const THREAD_INDENT = 18;
+          const LEFT_PAD = yAxisLayout?.labelPadding?.left ?? 8;
+          const RIGHT_PAD = yAxisLayout?.labelPadding?.right ?? 12;
+          const THREAD_INDENT = yAxisLayout?.labelPadding?.threadIndent ?? 18;
 
           let maxPx = 0;
 
           // Process labels (always visible)
-          ctx.font = '700 12px system-ui';
+          ctx.font = yAxisLayout?.processFont || '700 12px system-ui';
           for (const pid of orderedPids) {
             const indentPx = (depthByPid.get(String(pid)) || 0) * PROCESS_INDENT_PX;
-            const text = `▶ Process ${pid}`;
+            const text = getProcessLabel(pid, depthByPid.get(String(pid)) || 0, false);
             const w = ctx.measureText(text).width;
             maxPx = Math.max(maxPx, LEFT_PAD + indentPx + w + RIGHT_PAD);
           }
 
           // Thread labels (only for expanded blocks)
-          ctx.font = '500 11px system-ui';
+          ctx.font = yAxisLayout?.threadFont || '500 11px system-ui';
           for (const pid of expandedPids) {
             const threadMap = threadsByPid.get(pid);
             if (!threadMap) continue;
@@ -1333,22 +2056,23 @@ function App() {
             const tids = Array.from(threadMap.keys());
             for (const tid of tids) {
               const isMainThread = String(tid) === String(pid);
-              const text = isMainThread ? 'main thread' : `thread ${tid}`;
+              const text = getThreadLabel(pid, tid, isMainThread);
               const w = ctx.measureText(text).width;
               maxPx = Math.max(maxPx, LEFT_PAD + procIndentPx + THREAD_INDENT + w + RIGHT_PAD);
             }
           }
 
-          const MIN = 120;
-          const MAX = 240;
+          const MIN = yAxisLayout?.minWidth ?? 120;
+          const MAX = yAxisLayout?.maxWidth ?? 240;
           return Math.round(clampNumber(maxPx, MIN, MAX));
         } catch {
           return null;
         }
       };
 
-      const measuredWidth = computeYAxisWidth();
-      const Y_AXIS_WIDTH = measuredWidth || yAxisWidth || 180;
+      const measuredWidth = yAxisLayout?.autoWidth === false ? null : computeYAxisWidth();
+      const baseWidth = yAxisLayout?.baseWidth ?? 180;
+      const Y_AXIS_WIDTH = measuredWidth || yAxisWidth || baseWidth;
       // Avoid render loops: only update when it meaningfully changes.
       if (measuredWidth && Math.abs(measuredWidth - (yAxisWidth || 0)) >= 3) {
         setYAxisWidth(measuredWidth);
@@ -1411,7 +2135,7 @@ function App() {
                 pid,
                 tid: String(tid),
                 level: idx,
-                threadLabel: idx === 0 ? (isMainThread ? 'main thread' : `thread ${tid}`) : '',
+                threadLabel: idx === 0 ? getThreadLabel(pid, tid, isMainThread) : '',
                 events
               });
             });
@@ -1429,7 +2153,7 @@ function App() {
               pid,
               tid: String(tid),
               level,
-              threadLabel: idx === 0 ? (isMainThread ? 'main thread' : `thread ${tid}`) : '',
+              threadLabel: idx === 0 ? getThreadLabel(pid, tid, isMainThread) : '',
               events: levelMap.get(level) || levelMap.get(String(level)) || []
             });
           });
@@ -1650,8 +2374,9 @@ function App() {
     // so the overview reflects the main Gantt ordering.
     const overviewBinsCount = Math.min(900, Math.max(300, Math.floor(innerWidth)));
     const LANE_COUNT = 6;
-    const colorConfig = ganttConfig?.colorMapping || GANTT_CONFIG.colorMapping;
-    const defaultPalette = GANTT_CONFIG.colorMapping.palette;
+    const colorConfig = ganttConfig?.color || GANTT_CONFIG.color;
+    const legacyColorConfig = ganttConfig?.colorMapping || GANTT_CONFIG.colorMapping;
+    const defaultPalette = GANTT_CONFIG.color?.palette || [];
     const laneDiffs = Array.from({ length: LANE_COUNT }, () => new Array(overviewBinsCount + 1).fill(0));
     const laneColorCounts = Array.from({ length: LANE_COUNT }, () => new Map());
     const pidToBlockIndex = new Map();
@@ -1680,7 +2405,7 @@ function App() {
           pid: ev.pid,
           tid: ev.tid,
           level: ev.level
-        }, colorConfig);
+        }, colorConfig, legacyColorConfig);
         lane = hashStringToInt(laneKey) % LANE_COUNT;
       }
       lane = Math.max(0, Math.min(LANE_COUNT - 1, lane));
@@ -1693,7 +2418,7 @@ function App() {
         pid: ev.pid,
         tid: ev.tid,
         level: ev.level
-      }, colorConfig, defaultPalette);
+      }, colorConfig, defaultPalette, legacyColorConfig, processStats);
       const weight = Math.max(1, i1 - i0);
       const colorCounts = laneColorCounts[lane];
       colorCounts.set(color, (colorCounts.get(color) || 0) + weight);
@@ -1725,7 +2450,7 @@ function App() {
     }
 
       const colorFor = (item, trackKey, trackMeta) => (
-        resolveColor(item, trackKey, trackMeta, colorConfig, defaultPalette)
+        resolveColor(item, trackKey, trackMeta, colorConfig, defaultPalette, legacyColorConfig, processStats)
       );
 
       const visibleState = {
@@ -1777,14 +2502,25 @@ function App() {
             // Collapsed: draw merged process bars in header row
             const y = block.headerY0 + 2;
             const h = headerHeight - 4;
+            const leftBound = margin.left + blockIndentPx;
+            const rightBound = margin.left + innerWidth + blockIndentPx;
+            // Collapsed view: render each pixel at most once.
+            // Events may come from multiple threads that overlap in time,
+            // but the collapsed bar should be uniform — clip each event
+            // to only its uncovered portion so no pixel is painted twice.
+            let collapsedCoveredEnd = -Infinity;
             merged.forEach((item) => {
-              const x1 = xOf(item.start ?? item.timeStart, p) + blockIndentPx;
-              const x2 = xOf(item.end ?? item.timeEnd, p) + blockIndentPx;
-              const leftBound = margin.left + blockIndentPx;
-              const rightBound = margin.left + innerWidth + blockIndentPx;
-              if (x2 < leftBound || x1 > rightBound) return;
+              const x1Raw = xOf(item.start ?? item.timeStart ?? 0, p) + blockIndentPx;
+              const x2Raw = xOf(item.end ?? item.timeEnd ?? 0, p) + blockIndentPx;
+              if (x2Raw < leftBound || x1Raw > rightBound) return;
+              const x1 = Math.round(x1Raw);
+              const endPx = x1 + Math.max(1, Math.round(x2Raw) - x1);
+              // Only render the portion beyond what's already covered
+              const drawX = Math.max(x1, collapsedCoveredEnd);
+              if (drawX >= endPx) return; // fully covered
               ctx.fillStyle = colorFor(item, `proc-${block.pid}`, { type: 'process', pid: block.pid });
-              ctx.fillRect(x1, y, Math.max(1, x2 - x1), h);
+              ctx.fillRect(drawX, y, endPx - drawX, h);
+              collapsedCoveredEnd = endPx;
             });
             continue;
           }
@@ -1819,21 +2555,42 @@ function App() {
               const events = lane.events || [];
               const barY = laneY0 + lanePadding;
               const barH = Math.max(2, laneH - lanePadding * 2);
-              events.forEach((ev) => {
-                const x1 = xOf(ev.start ?? ev.timeStart, p) + blockIndentPx;
-                const x2 = xOf(ev.end ?? ev.timeEnd, p) + blockIndentPx;
-                if (x2 < boxX1 || x1 > boxX1 + boxW) return;
-                const barColor = colorFor(ev, lane.tid, { type: 'lane', pid: block.pid, tid: lane.tid, level: lane.level });
-                const w = Math.max(1, x2 - x1);
-                ctx.fillStyle = barColor;
-                ctx.fillRect(x1, barY, w, barH);
 
-                // Draw label on long bars
+              // Pixel-snapped rendering with coverage clipping:
+              // Snap coordinates to integers, then only render the uncovered
+              // portion of each bar. This guarantees no pixel is painted twice
+              // for non-overlapping events, even when bars are close in pixel
+              // space due to zoom level or minimum-width enforcement.
+              let coveredEnd = -Infinity;
+
+              events.forEach((ev) => {
+                const tStart = ev.start ?? ev.timeStart ?? 0;
+                const tEnd   = ev.end   ?? ev.timeEnd   ?? 0;
+                const x1Raw = xOf(tStart, p) + blockIndentPx;
+                const x2Raw = xOf(tEnd, p) + blockIndentPx;
+                if (x2Raw < boxX1 || x1Raw > boxX1 + boxW) return;
+
+                // Snap to integer pixels
+                const x1 = Math.round(x1Raw);
+                const w = Math.max(1, Math.round(x2Raw) - x1);
+                const endPx = x1 + w;
+
+                // Only render the portion beyond what's already covered
+                const drawX = Math.max(x1, coveredEnd);
+                if (drawX >= endPx) return; // fully covered
+
+                const barColor = colorFor(ev, lane.tid, { type: 'lane', pid: block.pid, tid: lane.tid, level: lane.level });
+                ctx.fillStyle = barColor;
+                ctx.fillRect(drawX, barY, endPx - drawX, barH);
+
+                coveredEnd = endPx;
+
+                // Draw label on long bars (use full bar width for label sizing)
                 const label = (ev.name || ev.label || '').toString();
-                const LABEL_MIN_PX = 90;
+                const LABEL_MIN_PX = layoutConfig?.label?.minBarLabelPx ?? 90;
                 if (label && w >= LABEL_MIN_PX && barH >= 10) {
                   const clipX = Math.max(x1, boxX1);
-                  const clipW = Math.min(x2, boxX1 + boxW) - clipX;
+                  const clipW = Math.min(x1 + w, boxX1 + boxW) - clipX;
                   if (clipW >= LABEL_MIN_PX) {
                     ctx.save();
                     ctx.beginPath();
@@ -1985,7 +2742,7 @@ function App() {
           labels.push({
             key: `proc-${block.pid}`,
             kind: 'process',
-            text: `${block.expanded ? '▼' : '▶'} Process ${block.pid}`,
+            text: getProcessLabel(block.pid, block.depth, block.expanded),
             x: 8,
             y: block.headerY0 + headerHeight / 2 - scrollY,
             fontSize: 12,
@@ -2129,72 +2886,37 @@ function App() {
         redraw();
 
         if (hit && hit.item) {
+          const tooltipConfig = ganttConfig?.tooltip || GANTT_CONFIG.tooltip;
+          if (tooltipConfig?.enabled === false) {
+            tooltip.style.display = 'none';
+            return;
+          }
           tooltip.style.display = 'block';
           tooltip.style.left = `${e.clientX + 12}px`;
           tooltip.style.top = `${e.clientY + 12}px`;
           const item = hit.item;
           const pid = item.pid ?? hit.block.pid ?? '';
           const tid = item.tid ?? hit.lane?.tid ?? '';
-          const name = item.name ?? item.label ?? '';
-          const category = item.cat ?? '';
           const startUs = Number(item.start ?? item.timeStart);
           const endUs = Number(item.end ?? item.timeEnd);
           const durationUs = Number.isFinite(startUs) && Number.isFinite(endUs) ? Math.max(0, endUs - startUs) : 0;
           const sqlId = item.id ?? null;
 
-          if (hit.area === 'process') {
-            tooltip.innerHTML = `
-              <div class="tooltip-grid">
-                <div class="tooltip-col">
-                  <div class="tooltip-title">Process</div>
-                  <div class="tooltip-row"><span class="tooltip-key">Process:</span><span class="tooltip-value">${escapeHtml(pid)}</span></div>
-                  <div class="tooltip-row"><span class="tooltip-key">Duration:</span><span class="tooltip-value">${escapeHtml(formatDurationUs(durationUs))}</span></div>
-                </div>
-              </div>
-            `;
-            return;
-          }
-
-          const argsObj = (item.args && typeof item.args === 'object') ? item.args : {};
-          const argEntries = Object.entries(argsObj);
-          const MAX_ARGS = 24;
-          const shownArgs = argEntries.slice(0, MAX_ARGS);
-          const remainingCount = Math.max(0, argEntries.length - shownArgs.length);
-
-          const argsHtml = shownArgs.length > 0
-            ? shownArgs.map(([k, v]) => `
-                <div class="tooltip-row">
-                  <span class="tooltip-key">${escapeHtml(k)}:</span>
-                  <span class="tooltip-value">${escapeHtml(formatArgValue(v))}</span>
-                </div>
-              `).join('')
-            : `<div class="tooltip-muted">No arguments</div>`;
-
-          const extraHtml = remainingCount > 0
-            ? `<div class="tooltip-muted">… (+${remainingCount} more)</div>`
-            : '';
-
-          tooltip.innerHTML = `
-            <div class="tooltip-grid">
-              <div class="tooltip-col">
-                <div class="tooltip-title">Details</div>
-                <div class="tooltip-row"><span class="tooltip-key">Name:</span><span class="tooltip-value">${escapeHtml(name)}</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">Category:</span><span class="tooltip-value">${escapeHtml(category)}</span></div>
-                <div class="tooltip-spacer"></div>
-                <div class="tooltip-row"><span class="tooltip-key">Start time:</span><span class="tooltip-value">${escapeHtml(formatTimeUsFull(startUs))}</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">Duration:</span><span class="tooltip-value">${escapeHtml(formatDurationUs(durationUs))}</span></div>
-                <div class="tooltip-spacer"></div>
-                <div class="tooltip-row"><span class="tooltip-key">Thread:</span><span class="tooltip-value">${escapeHtml(tid ? `${tid} [${tid}]` : '')}</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">Process:</span><span class="tooltip-value">${escapeHtml(pid)}</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">SQL ID:</span><span class="tooltip-value">${sqlId !== null ? escapeHtml(`slice[${sqlId}]`) : ''}</span></div>
-              </div>
-              <div class="tooltip-col">
-                <div class="tooltip-title">Arguments</div>
-                ${argsHtml}
-                ${extraHtml}
-              </div>
-            </div>
-          `;
+          const stats = processStats.get(String(pid)) || {};
+          const tooltipHtml = buildTooltipHtml(hit, tooltipConfig, {
+            event: item,
+            block: hit.block,
+            lane: hit.lane,
+            pid,
+            tid: String(tid ?? ''),
+            startUs,
+            endUs,
+            durationUs,
+            sqlId,
+            stats,
+            vars: { pid, tid, startUs, endUs, durationUs, sqlId }
+          });
+          tooltip.innerHTML = tooltipHtml;
         } else {
           tooltip.style.display = 'none';
         }
@@ -2509,6 +3231,26 @@ function App() {
     }
   }, [messages, currentStreamingMessage]);
 
+  useEffect(() => {
+    if (!configHighlightId || activeConfigItem?.id !== configHighlightId) return;
+    const textarea = configEditorTextareaRef.current;
+    if (!textarea) return;
+    const frame = requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [configHighlightId, activeConfigItem]);
+
+  useEffect(() => {
+    if (!configHighlightId) return;
+    const selector = `.config-button[data-config-item-id="${configHighlightId}"]`;
+    const button = document.querySelector(selector);
+    if (button) {
+      button.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [configHighlightId]);
+
   // Handle sending messages to LLM
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isStreaming) return;
@@ -2541,12 +3283,22 @@ function App() {
     // Prepare enhanced context about the current chart data for tracks configuration
     const uniqueTracks = [...new Set(data.map(d => d.pid ?? d.tid ?? d.track))];
     const configSummary = [
-      `yAxis.orderMode=${ganttConfig?.yAxis?.orderMode || 'default'}`,
-      `yAxis.thread.orderMode=${ganttConfig?.yAxis?.thread?.orderMode || 'auto'}`,
-      `color.mode=${ganttConfig?.colorMapping?.mode || 'byField'}`,
-      `color.field=${ganttConfig?.colorMapping?.field || ''}`,
-      `color.fields=${(ganttConfig?.colorMapping?.fields || []).join('|')}`
+      `yAxis.processOrderRule=${ganttConfig?.yAxis?.processOrderRule?.name || 'pidAsc'}`,
+      `yAxis.threadLaneRule=${ganttConfig?.yAxis?.threadLaneRule?.name || 'autoPack'}`,
+      `color.keyRule=${ganttConfig?.color?.keyRule ? 'rule' : 'default'}`,
+      `color.palette=${(ganttConfig?.color?.palette || []).length}`,
+      `tooltip=${ganttConfig?.tooltip?.enabled === false ? 'off' : 'on'}`
     ].join(', ');
+    const activeConfigContext = activeConfigItem
+      ? {
+          id: activeConfigItem.id,
+          label: activeConfigItem.label,
+          path: activeConfigItem.path,
+          description: activeConfigItem.description,
+          example: activeConfigItem.example,
+          currentValue: getValueAtPath(ganttConfig, activeConfigItem.path)
+        }
+      : null;
     const chartContext = {
       totalTracks: uniqueTracks.length,
       trackNames: uniqueTracks.sort(),
@@ -2554,13 +3306,31 @@ function App() {
         ? `${formatTimeUs(startTime)} to ${formatTimeUs(endTime)}`
         : 'unknown',
       dataPointCount: data.length,
-      configSummary
+      configSummary,
+      activeConfigItem: activeConfigContext
     };
 
-    const isWidgetRequest = /\bwidgets?\b/i.test(inputMessage);
-    const enhancedSystemPrompt = isWidgetRequest
-      ? getWidgetSystemPrompt(chartContext, widgetConfig, widgets)
-      : getEnhancedSystemPrompt(chartContext);
+    // Use widget agent mode toggle instead of regex detection
+    const eventFields = extractEventFieldPaths(data, 80);
+    const sampleEvents = Array.isArray(data) ? data.slice(0, 5) : [];
+    console.log('[Config Agent] Event fields extracted:', eventFields);
+    console.log('[Config Agent] Sample events:', sampleEvents.length);
+    console.log('[Agent Mode] Widget agent mode:', isWidgetAgentMode);
+    const enhancedSystemPrompt = isWidgetAgentMode
+      ? getWidgetSystemPrompt(chartContext, widgetConfig, widgets, {
+          dataSchema,
+          fieldMapping,
+          eventFields,
+          sampleEvents
+        })
+      : buildSystemPrompt({
+          schema: dataSchema,
+          currentConfig: ganttConfig,
+          activeConfigItem: activeConfigContext,
+          eventFields,
+          sampleEvents,
+          fieldMapping
+        });
 
     const contextualMessages = [
       { role: 'system', content: enhancedSystemPrompt },
@@ -2588,13 +3358,57 @@ function App() {
 
           // Check if the response contains a configuration update
           const configResponse = parseTrackConfigFromResponse(accumulatedMessage);
-          if (configResponse?.action === 'update_gantt_config') {
+          if (configResponse?.action === 'clarification_needed') {
+            const question = configResponse.question || 'Could you clarify the requested configuration?';
+            const suggestions = Array.isArray(configResponse.suggestions)
+              ? ` Suggestions: ${configResponse.suggestions.join(', ')}`
+              : '';
+            setMessages(prev => [
+              ...prev,
+              {
+                role: 'system',
+                content: `Question: ${question}${suggestions}`
+              }
+            ]);
+          } else if (configResponse?.action === 'update_gantt_config') {
             try {
-              const nextConfig = applyGanttConfigPatch(ganttConfig, configResponse.patch);
+              let patchToApply = configResponse.patch;
+              if (activeConfigItem?.path) {
+                const nextValue = getValueAtPath(configResponse.patch, activeConfigItem.path);
+                if (nextValue === undefined) {
+                  setMessages(prev => [
+                    ...prev,
+                    {
+                      role: 'system',
+                      content: `⚠️ No update applied. The assistant must update only: ${activeConfigItem.path}`
+                    }
+                  ]);
+                  return;
+                }
+                patchToApply = buildPatchForPath(activeConfigItem.path, nextValue);
+              }
+              const nextConfig = applyGanttConfigPatch(ganttConfig, patchToApply);
               setGanttConfig(nextConfig);
-              if (configResponse.patch?.yAxis?.orderMode) {
-                const nextMode = configResponse.patch.yAxis.orderMode;
+              if (patchToApply?.yAxis?.processOrderRule) {
+                setProcessSortMode(
+                  inferProcessSortModeFromRule(patchToApply.yAxis.processOrderRule)
+                );
+              } else if (patchToApply?.yAxis?.orderMode) {
+                const nextMode = patchToApply.yAxis.orderMode;
                 setProcessSortMode(nextMode === 'fork' ? 'fork' : 'default');
+              }
+              // Use extractTargetPath to find which config item was modified
+              const targetPath = configResponse.targetPath || extractTargetPath(patchToApply);
+              const matchedItem = targetPath 
+                ? FLAT_CONFIG_ITEMS.find(item => item.path === targetPath) || findConfigItemForPatch(patchToApply)
+                : (activeConfigItem?.path && getValueAtPath(patchToApply, activeConfigItem.path) !== undefined
+                    ? activeConfigItem
+                    : findConfigItemForPatch(patchToApply));
+              if (matchedItem) {
+                handleOpenConfigEditor(matchedItem, {
+                  configOverride: nextConfig,
+                  highlight: true
+                });
               }
               setMessages(prev => [
                 ...prev,
@@ -2643,16 +3457,48 @@ function App() {
             }
           } else if (configResponse?.action === 'create_widget') {
             try {
-              const nextWidget = normalizeWidget(configResponse.widget);
+              const rawWidget = normalizeWidget(configResponse.widget);
+              
+              // Validate and auto-fix the widget
+              const validation = validateWidget(rawWidget, widgets);
+              
+              if (!validation.valid) {
+                console.error('Widget validation errors:', validation.errors);
+                throw new Error(validation.errors.join('; '));
+              }
+              
+              const nextWidget = validation.widget;
+              
+              // Log any fixes or warnings
+              if (validation.fixes.length > 0) {
+                console.log('[Widget Validator] Auto-fixes applied:', validation.fixes);
+              }
+              if (validation.warnings.length > 0) {
+                console.warn('[Widget Validator] Warnings:', validation.warnings);
+              }
+              
               if (!nextWidget.html) {
                 throw new Error('Widget HTML is empty.');
               }
+              
               setWidgets(prev => [...prev, nextWidget]);
+              // Auto-open the widget editor for the newly created widget
+              handleOpenWidgetEditor(nextWidget, { highlight: true });
+              
+              // Build message with any fixes/warnings
+              let statusMsg = `✅ Widget added: ${nextWidget.name}`;
+              if (validation.fixes.length > 0) {
+                statusMsg += `\n(Auto-fixes: ${validation.fixes.join(', ')})`;
+              }
+              if (validation.warnings.length > 0) {
+                statusMsg += `\n⚠️ Warnings: ${validation.warnings.join(', ')}`;
+              }
+              
               setMessages(prev => [
                 ...prev,
                 {
                   role: 'system',
-                  content: `✅ Widget added: ${nextWidget.name}`
+                  content: statusMsg
                 }
               ]);
             } catch (error) {
@@ -2667,11 +3513,31 @@ function App() {
             }
           } else if (configResponse?.action === 'update_widget') {
             try {
-              const nextWidget = normalizeWidget(configResponse.widget);
+              const rawWidget = normalizeWidget(configResponse.widget);
+              
+              // Validate the widget (exclude current widget from conflict check)
+              const otherWidgets = widgets.filter(w => w.id !== rawWidget.id);
+              const validation = validateWidget(rawWidget, otherWidgets);
+              
+              if (!validation.valid) {
+                console.error('Widget validation errors:', validation.errors);
+                throw new Error(validation.errors.join('; '));
+              }
+              
+              const nextWidget = validation.widget;
+              
+              // Log any fixes or warnings
+              if (validation.fixes.length > 0) {
+                console.log('[Widget Validator] Auto-fixes applied:', validation.fixes);
+              }
+              if (validation.warnings.length > 0) {
+                console.warn('[Widget Validator] Warnings:', validation.warnings);
+              }
+              
               setWidgets(prev => {
-                const index = prev.findIndex(item => item.id === nextWidget.id);
+                const index = prev.findIndex(item => item.id === rawWidget.id);
                 if (index === -1) {
-                  throw new Error(`Widget not found: ${nextWidget.id}`);
+                  throw new Error(`Widget not found: ${rawWidget.id}`);
                 }
                 const updated = [...prev];
                 const existing = updated[index];
@@ -2683,11 +3549,21 @@ function App() {
                 };
                 return updated;
               });
+              
+              // Build message with any fixes/warnings
+              let statusMsg = `✅ Widget updated: ${nextWidget.name}`;
+              if (validation.fixes.length > 0) {
+                statusMsg += `\n(Auto-fixes: ${validation.fixes.join(', ')})`;
+              }
+              if (validation.warnings.length > 0) {
+                statusMsg += `\n⚠️ Warnings: ${validation.warnings.join(', ')}`;
+              }
+              
               setMessages(prev => [
                 ...prev,
                 {
                   role: 'system',
-                  content: `✅ Widget updated: ${nextWidget.name}`
+                  content: statusMsg
                 }
               ]);
             } catch (error) {
@@ -2800,6 +3676,165 @@ function App() {
     }
   };
 
+  const clearConfigHighlight = () => {
+    if (configHighlightTimeoutRef.current) {
+      clearTimeout(configHighlightTimeoutRef.current);
+      configHighlightTimeoutRef.current = null;
+    }
+    setConfigHighlightId(null);
+  };
+
+  const handleOpenConfigEditor = (item, options = {}) => {
+    if (!item) return;
+    const { configOverride, highlight = false } = options;
+    const sourceConfig = configOverride || ganttConfig;
+    const currentValue = getValueAtPath(sourceConfig, item.path);
+    const serialized = currentValue === undefined
+      ? ''
+      : JSON.stringify(currentValue, null, 2);
+    setActiveConfigItem(item);
+    setConfigEditorText(serialized);
+    setConfigEditorError('');
+    if (highlight) {
+      setConfigHighlightId(item.id);
+      if (configHighlightTimeoutRef.current) {
+        clearTimeout(configHighlightTimeoutRef.current);
+      }
+      configHighlightTimeoutRef.current = setTimeout(() => {
+        setConfigHighlightId(null);
+        configHighlightTimeoutRef.current = null;
+      }, 3500);
+    } else {
+      clearConfigHighlight();
+    }
+  };
+
+  const handleCloseConfigEditor = () => {
+    clearConfigHighlight();
+    setActiveConfigItem(null);
+    setConfigEditorText('');
+    setConfigEditorError('');
+  };
+
+  const handleSaveConfigEditor = () => {
+    if (!activeConfigItem) return;
+    try {
+      const parsed = configEditorText ? JSON.parse(configEditorText) : null;
+      const patch = buildPatchForPath(activeConfigItem.path, parsed);
+      const nextConfig = applyGanttConfigPatch(ganttConfig, patch);
+      setGanttConfig(nextConfig);
+      if (activeConfigItem.path === 'yAxis.processOrderRule') {
+        setProcessSortMode(inferProcessSortModeFromRule(parsed));
+      } else if (activeConfigItem.path === 'yAxis.orderMode') {
+        setProcessSortMode(parsed === 'fork' ? 'fork' : 'default');
+      }
+      clearConfigHighlight();
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'system',
+          content: `✅ Updated ${activeConfigItem.label}`
+        }
+      ]);
+      setConfigEditorError('');
+      handleCloseConfigEditor();
+    } catch (error) {
+      setConfigEditorError(`Invalid JSON: ${error.message}`);
+      return;
+    }
+  };
+
+  // Widget editor handlers
+  const clearWidgetHighlight = () => {
+    if (widgetHighlightTimeoutRef.current) {
+      clearTimeout(widgetHighlightTimeoutRef.current);
+      widgetHighlightTimeoutRef.current = null;
+    }
+    setWidgetHighlightId(null);
+  };
+
+  const handleOpenWidgetEditor = (widget, options = {}) => {
+    if (!widget) return;
+    const { highlight = false } = options;
+    const serialized = JSON.stringify({
+      id: widget.id,
+      name: widget.name,
+      html: widget.html,
+      listeners: widget.listeners,
+      description: widget.description
+    }, null, 2);
+    setActiveWidget(widget);
+    setWidgetEditorText(serialized);
+    setWidgetEditorError('');
+    if (highlight) {
+      setWidgetHighlightId(widget.id);
+      if (widgetHighlightTimeoutRef.current) {
+        clearTimeout(widgetHighlightTimeoutRef.current);
+      }
+      widgetHighlightTimeoutRef.current = setTimeout(() => {
+        setWidgetHighlightId(null);
+        widgetHighlightTimeoutRef.current = null;
+      }, 3500);
+    } else {
+      clearWidgetHighlight();
+    }
+  };
+
+  const handleCloseWidgetEditor = () => {
+    clearWidgetHighlight();
+    setActiveWidget(null);
+    setWidgetEditorText('');
+    setWidgetEditorError('');
+  };
+
+  const handleSaveWidgetEditor = () => {
+    if (!activeWidget) return;
+    try {
+      const parsed = widgetEditorText ? JSON.parse(widgetEditorText) : null;
+      if (!parsed || !parsed.id) {
+        throw new Error('Widget must have an id.');
+      }
+      const updatedWidget = normalizeWidget(parsed);
+      setWidgets(prev => {
+        const index = prev.findIndex(w => w.id === activeWidget.id);
+        if (index === -1) {
+          // New widget - shouldn't happen via editor, but handle gracefully
+          return [...prev, updatedWidget];
+        }
+        const updated = [...prev];
+        updated[index] = updatedWidget;
+        return updated;
+      });
+      clearWidgetHighlight();
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'system',
+          content: `✅ Updated widget: ${updatedWidget.name}`
+        }
+      ]);
+      setWidgetEditorError('');
+      handleCloseWidgetEditor();
+    } catch (error) {
+      setWidgetEditorError(`Invalid JSON: ${error.message}`);
+      return;
+    }
+  };
+
+  const handleDeleteWidget = (widgetId) => {
+    setWidgets(prev => prev.filter(w => w.id !== widgetId));
+    if (activeWidget?.id === widgetId) {
+      handleCloseWidgetEditor();
+    }
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: 'system',
+        content: `🗑️ Widget deleted`
+      }
+    ]);
+  };
+
   if (loading && (!data || data.length === 0)) {
     return (
       <div className="App">
@@ -2871,21 +3906,17 @@ function App() {
     );
   }
 
+  // Widget layout - DynaVis-style compact toolbar
   const widgetLayout = widgetConfig?.layout || {};
-  const widgetContainerStyle = {
-    ...(widgetConfig?.style?.container || {})
-  };
+  const widgetContainerStyle = {}; // Let CSS handle container styling
   const widgetAreaStyle = {
-    display: 'flex',
-    flexDirection: widgetLayout.direction === 'row' ? 'row' : 'column',
-    flexWrap: widgetLayout.wrap === 'wrap' ? 'wrap' : 'nowrap',
-    gap: toCssSize(widgetLayout.gap, '12px'),
-    width: '100%',
-    maxWidth: toCssSize(widgetLayout.maxWidth, '100%'),
-    alignItems: widgetLayout.alignItems || 'stretch'
+    // Minimal overrides - let CSS handle most styling
+    maxWidth: widgetLayout.maxWidth && widgetLayout.maxWidth !== '100%' 
+      ? toCssSize(widgetLayout.maxWidth, '100%') 
+      : undefined
   };
-  const widgetCardStyle = widgetConfig?.style?.widgetCard || {};
-  const widgetTitleStyle = widgetConfig?.style?.widgetTitle || {};
+  const widgetCardStyle = {}; // Let CSS handle card styling
+  const widgetTitleStyle = {}; // Let CSS handle title styling
 
   return (
     <div className="App">
@@ -2945,6 +3976,59 @@ function App() {
             <p className="chat-subtitle">Ask questions about your data</p>
           </div>
 
+          <div className="chat-config-panel">
+            {GANTT_CONFIG_UI_SPEC.map((domain) => (
+              <div key={domain.id} className="config-domain">
+                <div className="config-domain-header">
+                  <span className="config-domain-title">{domain.title}</span>
+                  {domain.description && (
+                    <span className="config-domain-subtitle">{domain.description}</span>
+                  )}
+                </div>
+                <div className="config-buttons">
+                  {domain.items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`config-button ${activeConfigItem?.id === item.id ? 'active' : ''} ${configHighlightId === item.id ? 'highlight' : ''}`}
+                      data-config-item-id={item.id}
+                      title={item.description || item.label}
+                      onClick={() => handleOpenConfigEditor(item)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {/* Added Widgets Section */}
+            <div className="config-domain widgets-domain">
+              <div className="config-domain-header">
+                <span className="config-domain-title">Added Widgets</span>
+                <span className="config-domain-subtitle">Custom UI widgets created by the assistant</span>
+              </div>
+              <div className="config-buttons widget-buttons">
+                {widgets.length === 0 ? (
+                  <span className="no-widgets-hint">No widgets yet. Enable Widget Mode below to create widgets.</span>
+                ) : (
+                  widgets.map((widget) => (
+                    <button
+                      key={widget.id}
+                      type="button"
+                      className={`config-button widget-config-button ${activeWidget?.id === widget.id ? 'active' : ''} ${widgetHighlightId === widget.id ? 'highlight' : ''}`}
+                      data-widget-id={widget.id}
+                      title={widget.description || widget.name}
+                      onClick={() => handleOpenWidgetEditor(widget)}
+                    >
+                      {widget.name}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="chat-messages">
             {messages.length === 0 && (
               <div className="chat-welcome">
@@ -2956,7 +4040,40 @@ function App() {
             {messages.map((msg, idx) => (
               <div key={idx} className={`message ${msg.role}`}>
                 <div className="message-content">
-                  {msg.content}
+                  {parseMessageSegments(msg.content).map((segment, segmentIndex) => {
+                    if (segment.type === 'code') {
+                      const languageLabel = segment.language
+                        ? `${segment.language.toUpperCase()} code`
+                        : 'Code';
+                      return (
+                        <details
+                          key={`msg-${idx}-code-${segmentIndex}`}
+                          className="message-code"
+                        >
+                          <summary>
+                            <span className="message-code-label">{languageLabel}</span>
+                            <span className="message-code-hint message-code-hint-closed">
+                              Show code
+                            </span>
+                            <span className="message-code-hint message-code-hint-open">
+                              Hide code
+                            </span>
+                          </summary>
+                          <pre className="message-code-block">
+                            <code>{segment.content}</code>
+                          </pre>
+                        </details>
+                      );
+                    }
+                    return (
+                      <span
+                        key={`msg-${idx}-text-${segmentIndex}`}
+                        className="message-text"
+                      >
+                        {segment.content}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -3021,17 +4138,30 @@ function App() {
           )}
           
           <div className="chat-input-container">
-            <div className="chat-drawing-controls">
-              <DrawingControls
-                isActive={isDrawingMode}
-                onToggle={setIsDrawingMode}
-                onClear={handleClear}
-                brushSize={brushSize}
-                setBrushSize={setBrushSize}
-                brushColor={brushColor}
-                setBrushColor={setBrushColor}
-                showSort={false}
-              />
+            <div className="chat-mode-controls">
+              <div className="chat-drawing-controls">
+                <DrawingControls
+                  isActive={isDrawingMode}
+                  onToggle={setIsDrawingMode}
+                  onClear={handleClear}
+                  brushSize={brushSize}
+                  setBrushSize={setBrushSize}
+                  brushColor={brushColor}
+                  setBrushColor={setBrushColor}
+                  showSort={false}
+                />
+              </div>
+              <div className="widget-mode-toggle">
+                <label className="toggle-label" title="Enable widget creation mode">
+                  <input
+                    type="checkbox"
+                    checked={isWidgetAgentMode}
+                    onChange={(e) => setIsWidgetAgentMode(e.target.checked)}
+                  />
+                  <span className="toggle-slider"></span>
+                  <span className="toggle-text">Widget Mode</span>
+                </label>
+              </div>
             </div>
             <div className="input-controls-row">
               <button 
@@ -3043,8 +4173,8 @@ function App() {
                 📸
               </button>
               <textarea
-                className="chat-input"
-                placeholder="Ask about the chart data..."
+                className={`chat-input ${isWidgetAgentMode ? 'widget-mode' : ''}`}
+                placeholder={isWidgetAgentMode ? "Describe the widget you want to create..." : "Ask about the chart data..."}
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
@@ -3064,7 +4194,133 @@ function App() {
                 📎 Image will be sent with message
               </div>
             )}
+            {isWidgetAgentMode && (
+              <div className="widget-mode-indicator">
+                🧩 Widget Mode: Describe a widget to create (e.g., "Create a filter dropdown for process names")
+              </div>
+            )}
           </div>
+
+          {activeConfigItem && (
+            <div className="config-editor-modal" role="dialog" aria-modal="true">
+              <div className={`config-editor config-editor-window ${configHighlightId === activeConfigItem.id ? 'highlight' : ''}`}>
+                <div className="config-editor-header">
+                  <div className="config-editor-title">
+                    Edit: {activeConfigItem.label}
+                  </div>
+                  <div className="config-editor-path">
+                    {activeConfigItem.path}
+                  </div>
+                </div>
+                {activeConfigItem.description && (
+                  <div className="config-editor-description">
+                    {activeConfigItem.description}
+                  </div>
+                )}
+                <textarea
+                  ref={configEditorTextareaRef}
+                  className={`config-editor-textarea ${configHighlightId === activeConfigItem.id ? 'highlight' : ''}`}
+                  value={configEditorText}
+                  onChange={(e) => setConfigEditorText(e.target.value)}
+                  placeholder="Paste JSON value here"
+                  rows={8}
+                />
+                {activeConfigItem.example && (
+                  <pre className="config-editor-example">
+                    {activeConfigItem.example}
+                  </pre>
+                )}
+                {configEditorError && (
+                  <div className="config-editor-error">{configEditorError}</div>
+                )}
+                <div className="config-editor-actions">
+                  <button
+                    type="button"
+                    className="config-editor-save"
+                    onClick={handleSaveConfigEditor}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    className="config-editor-cancel"
+                    onClick={handleCloseConfigEditor}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeWidget && (
+            <div className="config-editor-modal widget-editor-modal" role="dialog" aria-modal="true">
+              <div className={`config-editor widget-editor-window ${widgetHighlightId === activeWidget.id ? 'highlight' : ''}`}>
+                <div className="config-editor-header widget-editor-header">
+                  <div className="config-editor-title">
+                    Edit Widget: {activeWidget.name}
+                  </div>
+                  <div className="config-editor-path">
+                    ID: {activeWidget.id}
+                  </div>
+                </div>
+                {activeWidget.description && (
+                  <div className="config-editor-description">
+                    {activeWidget.description}
+                  </div>
+                )}
+                <textarea
+                  className={`config-editor-textarea widget-editor-textarea ${widgetHighlightId === activeWidget.id ? 'highlight' : ''}`}
+                  value={widgetEditorText}
+                  onChange={(e) => setWidgetEditorText(e.target.value)}
+                  placeholder="Edit widget JSON here"
+                  rows={12}
+                />
+                <pre className="config-editor-example widget-editor-example">
+{`Widget format:
+{
+  "id": "widget-id",
+  "name": "Widget Name",
+  "html": "<label>...</label><select>...</select>",
+  "listeners": [
+    {
+      "selector": "select",
+      "event": "change",
+      "handler": "console.log(payload.value);"
+    }
+  ],
+  "description": "What this widget does"
+}`}
+                </pre>
+                {widgetEditorError && (
+                  <div className="config-editor-error">{widgetEditorError}</div>
+                )}
+                <div className="config-editor-actions widget-editor-actions">
+                  <button
+                    type="button"
+                    className="config-editor-save"
+                    onClick={handleSaveWidgetEditor}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    className="config-editor-cancel widget-delete-button"
+                    onClick={() => handleDeleteWidget(activeWidget.id)}
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    className="config-editor-cancel"
+                    onClick={handleCloseWidgetEditor}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
