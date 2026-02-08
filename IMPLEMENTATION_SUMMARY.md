@@ -104,6 +104,7 @@ App.js (Main Container)
 ### Drawing Workflow
 
 1. **Initialization**
+
    ```javascript
    <GanttDrawingOverlay
      ref={drawingOverlayRef}
@@ -114,6 +115,7 @@ App.js (Main Container)
    ```
 
 2. **Mouse Event Flow**
+
    ```
    mouseDown → startDrawing() → create new path
    mouseMove → draw() → extend current path
@@ -122,7 +124,7 @@ App.js (Main Container)
 
 3. **Export Process**
    ```
-   exportAnnotatedImage() 
+   exportAnnotatedImage()
      → Clone chart SVG
      → Append drawing paths
      → Serialize to string
@@ -331,14 +333,14 @@ const [showColorPicker, setShowColorPicker] = useState(false);
 
 ### Supported Browsers
 
-| Browser | Version | Status |
-|---------|---------|--------|
-| Chrome | 90+ | ✅ Full Support |
-| Edge | 90+ | ✅ Full Support |
-| Firefox | 88+ | ✅ Full Support |
-| Safari | 14+ | ✅ Full Support |
-| Mobile Safari | 14+ | ✅ Full Support |
-| Chrome Android | 90+ | ✅ Full Support |
+| Browser        | Version | Status          |
+| -------------- | ------- | --------------- |
+| Chrome         | 90+     | ✅ Full Support |
+| Edge           | 90+     | ✅ Full Support |
+| Firefox        | 88+     | ✅ Full Support |
+| Safari         | 14+     | ✅ Full Support |
+| Mobile Safari  | 14+     | ✅ Full Support |
+| Chrome Android | 90+     | ✅ Full Support |
 
 ### Required APIs
 
@@ -485,4 +487,3 @@ The module seamlessly integrates with the existing GanttSketch application and p
 **Implementation Date**: November 2025  
 **Version**: 1.0.0  
 **Status**: Complete and Ready for Testing
-

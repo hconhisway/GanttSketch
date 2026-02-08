@@ -7,20 +7,23 @@ The enhanced visual grouping feature provides rich visual indicators when tracks
 ## Visual Elements
 
 ### 1. **Group Labels** 📍
+
 - **Location**: Left side of the Y-axis
 - **Style**: 12px bold text in purple (#667eea)
 - **Position**: Centered vertically within each group
 - **Content**: Custom names or default "Group 1", "Group 2", etc.
 
 ### 2. **Background Colors** 🎨
+
 - **Pattern**: Alternating subtle backgrounds
-- **Colors**: 
+- **Colors**:
   - Even groups (0, 2, 4...): Light gray (#f8f9fa)
   - Odd groups (1, 3, 5...): White (#ffffff)
 - **Opacity**: 50% for subtle distinction
 - **Purpose**: Visual separation without distraction
 
 ### 3. **Separator Lines** ➖
+
 - **Style**: Dashed lines (4px dash, 4px gap)
 - **Color**: Medium gray (#999)
 - **Width**: 2px
@@ -28,6 +31,7 @@ The enhanced visual grouping feature provides rich visual indicators when tracks
 - **Purpose**: Clear boundaries between group regions
 
 ### 4. **Dynamic Layout** 📐
+
 - **Left Margin**: Automatically expands from 80px to 120px
 - **Y-Axis Label**: Hidden in grouped mode to reduce clutter
 - **Height**: Adjusts based on number of tracks and groups
@@ -47,6 +51,7 @@ setTracksConfig({
 ```
 
 **Visual Result:**
+
 ```
         Group 1 ┐
                 │ ← Light gray background
@@ -79,20 +84,21 @@ setTracksConfig({
 ```
 
 **Visual Result:**
+
 ```
         Critical ┐
                  │ ← Light gray background
                  ├─ Track 0 ■■■■■
                  ├─ Track 1 ■■■
                  └─ Track 2 ■■■■
-        ─ ─ ─ ─ ─ ─ ─ ─ ─  
+        ─ ─ ─ ─ ─ ─ ─ ─ ─
         Important ┐
                   │ ← White background
                   ├─ Track 3 ■■
                   ├─ Track 4 ■■■■■
                   ├─ Track 5 ■■
                   └─ Track 6 ■■■
-        ─ ─ ─ ─ ─ ─ ─ ─ ─  
+        ─ ─ ─ ─ ─ ─ ─ ─ ─
         Normal ┐
                │ ← Light gray background
                ├─ Track 7 ■■■■
@@ -170,30 +176,34 @@ const middlePosition = (firstTrackIndex + lastTrackIndex) / 2;
 groupLabels.push({
   groupName: group.name,
   trackPosition: trackOrder[Math.round(middlePosition)],
-  time: timeExtent[0]  // Left edge of chart
+  time: timeExtent[0] // Left edge of chart
 });
 ```
 
 ## Best Practices
 
 ### 1. **Group Naming**
+
 - ✅ Use descriptive names when context is clear
 - ✅ Use default numbers when splitting generically
 - ✅ Keep names concise (15 characters or less)
 - ❌ Avoid very long names that might overflow
 
 ### 2. **Group Size**
+
 - ✅ Aim for 3-10 tracks per group for optimal readability
 - ✅ Balance group sizes when possible
 - ⚠️ Very small groups (1-2 tracks) work but may look sparse
 - ⚠️ Very large groups (20+) may make labels harder to read
 
 ### 3. **Number of Groups**
+
 - ✅ 2-5 groups provide excellent visual distinction
 - ✅ Up to 8 groups is reasonable
 - ⚠️ 10+ groups may become visually cluttered
 
 ### 4. **Color Contrast**
+
 - The alternating backgrounds work best with:
   - Light-colored chart backgrounds
   - Standard theme colors
@@ -202,12 +212,14 @@ groupLabels.push({
 ## Customization Options
 
 ### Current Implementation
+
 - Background colors: Fixed alternating pattern
 - Label color: Purple (#667eea)
 - Label font: 12px bold
 - Separator style: 2px dashed
 
 ### Future Enhancements (Planned)
+
 - [ ] Custom background colors per group
 - [ ] Custom label colors
 - [ ] Adjustable label font size
@@ -225,6 +237,7 @@ groupLabels.push({
 ## Browser Compatibility
 
 Tested and working on:
+
 - ✅ Chrome 90+
 - ✅ Firefox 88+
 - ✅ Safari 14+
@@ -236,7 +249,8 @@ Tested and working on:
 
 **Cause:** Window is too narrow or zoom level is very high
 
-**Solution:** 
+**Solution:**
+
 - Expand the window width
 - Reduce browser zoom level
 - The 120px left margin should accommodate most labels
@@ -245,7 +259,8 @@ Tested and working on:
 
 **Cause:** High opacity may distract from data
 
-**Solution:** 
+**Solution:**
+
 - Background opacity is set to 0.5 (50%)
 - Can be adjusted in `App.js` by changing `fillOpacity` value
 
@@ -254,6 +269,7 @@ Tested and working on:
 **Cause:** Too many groups in small vertical space
 
 **Solution:**
+
 - Reduce number of groups
 - Increase chart height
 - Use shorter group names
@@ -267,6 +283,7 @@ Tested and working on:
 ## Summary
 
 The enhanced visual grouping system provides:
+
 - 🎯 Clear visual hierarchy
 - 📊 Better data organization
 - 🎨 Professional appearance
@@ -274,6 +291,7 @@ The enhanced visual grouping system provides:
 - ⚡ Zero performance overhead
 
 Perfect for:
+
 - Resource management dashboards
 - Task prioritization views
 - Multi-category analysis
@@ -284,10 +302,3 @@ Perfect for:
 
 **Version:** 1.3.1  
 **Last Updated:** 2025-11-06
-
-
-
-
-
-
-

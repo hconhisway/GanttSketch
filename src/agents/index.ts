@@ -1,6 +1,6 @@
 /**
  * Agent System Entry Point
- * 
+ *
  * Exports all agents and utilities for the Gantt chart configuration system.
  */
 
@@ -34,3 +34,6 @@ export {
   getConfigPathsBySection,
   getConfigById
 } from './configIndex';
+
+// Widget Agent
+export { WIDGET_AGENT_GUIDE, getWidgetSystemPrompt } from './widgetAgent';

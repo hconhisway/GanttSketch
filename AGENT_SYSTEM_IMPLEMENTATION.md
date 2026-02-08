@@ -37,6 +37,7 @@ The Gantt chart application now features an intelligent agent system with automa
 **Purpose**: Semantic metadata for all configuration items
 
 **Features**:
+
 - Auto-generated from `GANTT_CONFIG_SPEC.json`
 - Extracts keywords from paths and descriptions
 - Infers related concepts (e.g., "color" → "coloring", "palette", "hue")
@@ -44,6 +45,7 @@ The Gantt chart application now features an intelligent agent system with automa
 - Provides semantic search: `findMatchingConfigs(query)`
 
 **API**:
+
 ```javascript
 import { CONFIG_INDEX, findMatchingConfigs, getConfigInfo } from './agents';
 
@@ -51,7 +53,7 @@ import { CONFIG_INDEX, findMatchingConfigs, getConfigInfo } from './agents';
 const allConfigs = CONFIG_INDEX;
 
 // Find best matches for user query
-const matches = findMatchingConfigs("change color to red");
+const matches = findMatchingConfigs('change color to red');
 // Returns: [{ path, config, score }, ...]
 
 // Get specific config info
@@ -63,6 +65,7 @@ const colorInfo = getConfigInfo('color.keyRule');
 **Purpose**: LLM-powered schema detection and initial config generation
 
 **Features**:
+
 - Accepts arbitrary field naming conventions
 - Detects semantic roles (process_id, name, category, etc.)
 - Handles nested structures (e.g., `Raw.pid`, `enter.Timestamp`)
@@ -70,6 +73,7 @@ const colorInfo = getConfigInfo('color.keyRule');
 - Graceful fallback if analysis fails
 
 **API**:
+
 ```javascript
 import { analyzeAndInitialize } from './agents';
 
@@ -93,6 +97,7 @@ const result = await analyzeAndInitialize(rawEvents);
 ```
 
 **Initial Config Generation**:
+
 - **Color**: Uses category field if present, falls back to name
 - **Process Order**: Uses forkTree if parent_id detected
 - **Tooltip**: Adds all detected meaningful fields with appropriate formatters
@@ -102,6 +107,7 @@ const result = await analyzeAndInitialize(rawEvents);
 **Purpose**: Handle user configuration requests with semantic understanding
 
 **Features**:
+
 - Uses comprehensive config index for accurate matching
 - Includes data schema in prompt for field-aware suggestions
 - Provides Rule DSL reference for LLM
@@ -109,6 +115,7 @@ const result = await analyzeAndInitialize(rawEvents);
 - Extracts target path for UI highlighting
 
 **API**:
+
 ```javascript
 import { buildSystemPrompt, extractTargetPath, validatePatch } from './agents';
 
@@ -132,15 +139,13 @@ const validation = validatePatch(patch, schema);
 ### App.js Modifications
 
 1. **Imports** (line ~1-15):
+
    ```javascript
-   import {
-     analyzeAndInitialize,
-     buildSystemPrompt,
-     extractTargetPath
-   } from './agents';
+   import { analyzeAndInitialize, buildSystemPrompt, extractTargetPath } from './agents';
    ```
 
 2. **State** (line ~1444):
+
    ```javascript
    const [dataSchema, setDataSchema] = useState(null);
    ```
@@ -162,6 +167,7 @@ const validation = validatePatch(patch, schema);
 ## Preserved UI Elements
 
 The existing configuration UI remains **fully intact**:
+
 - Config panel with domain sections
 - Config buttons for each item
 - Config editor modal
@@ -171,6 +177,7 @@ The existing configuration UI remains **fully intact**:
 ## Data Flow
 
 ### On Data Load:
+
 ```
 User loads data
   → App.js: fetchDataWithFallback()
@@ -183,6 +190,7 @@ User loads data
 ```
 
 ### On Chat Message:
+
 ```
 User sends message
   → Config Agent: buildSystemPrompt()
@@ -209,13 +217,13 @@ User sends message
 
 ## Key Improvements
 
-| Aspect | Before | After |
-|--------|--------|-------|
-| Schema Detection | Hardcoded patterns | LLM-powered, handles any naming |
-| Config Discovery | Path depth matching | Semantic index + keyword scoring |
-| Initial Config | Fixed defaults | Generated from detected schema |
-| Extensibility | Manual prompt updates | Auto-generated from spec JSON |
-| Field References | Hardcoded field names | Uses detected field names |
+| Aspect           | Before                | After                            |
+| ---------------- | --------------------- | -------------------------------- |
+| Schema Detection | Hardcoded patterns    | LLM-powered, handles any naming  |
+| Config Discovery | Path depth matching   | Semantic index + keyword scoring |
+| Initial Config   | Fixed defaults        | Generated from detected schema   |
+| Extensibility    | Manual prompt updates | Auto-generated from spec JSON    |
+| Field References | Hardcoded field names | Uses detected field names        |
 
 ## Future Enhancements
 
@@ -229,15 +237,18 @@ User sends message
 ## Files Modified
 
 ### New Files:
+
 - `src/agents/index.js` - Agent system entry point
 - `src/agents/configIndex.js` - Config semantic index
 - `src/agents/dataAnalysisAgent.js` - Data analysis agent
 - `src/agents/configAgent.js` - Config agent
 
 ### Modified Files:
+
 - `src/App.js` - Integrated agents, added schema state
 
 ### Unchanged Files:
+
 - `src/GANTT_CONFIG_SPEC.json` - Source of truth
 - `src/ganttConfig.js` - Default config
 - `src/ganttConfigUiSpec.js` - UI spec builder

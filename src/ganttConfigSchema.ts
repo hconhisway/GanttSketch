@@ -1,13 +1,13 @@
 /**
  * Gantt Config Schema Reference
- * 
+ *
  * This file documents all valid configuration paths and formats for the Gantt chart.
  * Used by the Widget Agent to generate correct config patches.
  */
 
 /**
  * Color Configuration Schema
- * 
+ *
  * The color config determines how bars are colored in the chart.
  */
 export const COLOR_CONFIG_SCHEMA = {
@@ -16,11 +16,7 @@ export const COLOR_CONFIG_SCHEMA = {
   fixedColor: {
     type: 'string',
     description: 'A single color applied to all bars. Overrides palette and rules.',
-    examples: [
-      'rgba(0,0,0,0.38)',
-      '#2563EB',
-      'rgb(255, 0, 0)'
-    ],
+    examples: ['rgba(0,0,0,0.38)', '#2563EB', 'rgb(255, 0, 0)'],
     usage: `api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), {
   color: { fixedColor: 'rgba(0,0,0,0.38)' }
 }));`
@@ -35,7 +31,7 @@ export const COLOR_CONFIG_SCHEMA = {
       ['#ff0000', '#00ff00', '#0000ff']
     ],
     usage: `api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), {
-  color: { 
+  color: {
     palette: ['#2563EB', '#0EA5E9', '#14B8A6', '#10B981']
   }
 }));`
@@ -69,7 +65,7 @@ export const COLOR_CONFIG_SCHEMA = {
       }
     ],
     usage: `api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), {
-  color: { 
+  color: {
     keyRule: { type: 'expr', expr: { op: 'get', path: 'event.cat' } }
   }
 }));`
@@ -103,7 +99,13 @@ export const COLOR_CONFIG_SCHEMA = {
           args: [
             { op: '==', args: [{ op: 'get', path: 'event.cat' }, 'error'] },
             '#ff0000',
-            { op: 'paletteHash', args: [{ op: 'var', name: 'colorKey' }, { op: 'var', name: 'palette' }] }
+            {
+              op: 'paletteHash',
+              args: [
+                { op: 'var', name: 'colorKey' },
+                { op: 'var', name: 'palette' }
+              ]
+            }
           ]
         }
       }
@@ -126,7 +128,11 @@ export const YAXIS_CONFIG_SCHEMA = {
       // Sort by PID descending
       { type: 'transform', name: 'pidDesc' },
       // Custom order
-      { type: 'transform', name: 'customList', params: { list: ['pid1', 'pid2'], includeUnspecified: true } }
+      {
+        type: 'transform',
+        name: 'customList',
+        params: { list: ['pid1', 'pid2'], includeUnspecified: true }
+      }
     ]
   },
 
@@ -177,56 +183,74 @@ export const LAYOUT_CONFIG_SCHEMA = {
 
 /**
  * Expression DSL Reference
- * 
+ *
  * Operations available in expr objects.
  */
 export const EXPRESSION_OPS = {
   // Value getters
-  'get': { 
+  get: {
     description: 'Get a value from an object path',
     format: '{ op: "get", path: "event.fieldName" }',
     example: { op: 'get', path: 'event.cat' }
   },
-  'var': {
+  var: {
     description: 'Get a context variable',
     format: '{ op: "var", name: "varName" }',
     variables: ['pid', 'tid', 'level', 'colorKey', 'palette', 'startUs', 'durationUs', 'trackKey']
   },
 
   // String operations
-  'concat': { description: 'Concatenate values', format: '{ op: "concat", args: [a, b, ...] }' },
-  'lower': { description: 'Lowercase string', format: '{ op: "lower", args: [value] }' },
-  'upper': { description: 'Uppercase string', format: '{ op: "upper", args: [value] }' },
+  concat: { description: 'Concatenate values', format: '{ op: "concat", args: [a, b, ...] }' },
+  lower: { description: 'Lowercase string', format: '{ op: "lower", args: [value] }' },
+  upper: { description: 'Uppercase string', format: '{ op: "upper", args: [value] }' },
 
   // Logic operations
-  'if': { description: 'Conditional', format: '{ op: "if", args: [condition, thenValue, elseValue] }' },
-  'coalesce': { description: 'First non-empty value', format: '{ op: "coalesce", args: [a, b, ...] }' },
+  if: {
+    description: 'Conditional',
+    format: '{ op: "if", args: [condition, thenValue, elseValue] }'
+  },
+  coalesce: {
+    description: 'First non-empty value',
+    format: '{ op: "coalesce", args: [a, b, ...] }'
+  },
   '==': { description: 'Equality', format: '{ op: "==", args: [a, b] }' },
   '!=': { description: 'Inequality', format: '{ op: "!=", args: [a, b] }' },
-  'and': { description: 'Logical AND', format: '{ op: "and", args: [a, b] }' },
-  'or': { description: 'Logical OR', format: '{ op: "or", args: [a, b] }' },
+  and: { description: 'Logical AND', format: '{ op: "and", args: [a, b] }' },
+  or: { description: 'Logical OR', format: '{ op: "or", args: [a, b] }' },
 
   // Math operations
-  'add': { description: 'Addition', format: '{ op: "add", args: [a, b] }' },
-  'sub': { description: 'Subtraction', format: '{ op: "sub", args: [a, b] }' },
-  'mul': { description: 'Multiplication', format: '{ op: "mul", args: [a, b] }' },
-  'div': { description: 'Division', format: '{ op: "div", args: [a, b] }' },
+  add: { description: 'Addition', format: '{ op: "add", args: [a, b] }' },
+  sub: { description: 'Subtraction', format: '{ op: "sub", args: [a, b] }' },
+  mul: { description: 'Multiplication', format: '{ op: "mul", args: [a, b] }' },
+  div: { description: 'Division', format: '{ op: "div", args: [a, b] }' },
 
   // Color operations
-  'paletteHash': { 
+  paletteHash: {
     description: 'Hash a key to select from palette',
     format: '{ op: "paletteHash", args: [keyExpr, paletteExpr] }',
-    example: { op: 'paletteHash', args: [{ op: 'var', name: 'colorKey' }, { op: 'var', name: 'palette' }] }
+    example: {
+      op: 'paletteHash',
+      args: [
+        { op: 'var', name: 'colorKey' },
+        { op: 'var', name: 'palette' }
+      ]
+    }
   },
 
   // Formatting
-  'formatTimeUs': { description: 'Format microseconds as time', format: '{ op: "formatTimeUs", args: [value] }' },
-  'formatDurationUs': { description: 'Format duration', format: '{ op: "formatDurationUs", args: [value] }' }
+  formatTimeUs: {
+    description: 'Format microseconds as time',
+    format: '{ op: "formatTimeUs", args: [value] }'
+  },
+  formatDurationUs: {
+    description: 'Format duration',
+    format: '{ op: "formatDurationUs", args: [value] }'
+  }
 };
 
 /**
  * Widget API Reference
- * 
+ *
  * Methods available on the `api` object in widget handlers.
  */
 export const WIDGET_API_REFERENCE = {
@@ -244,7 +268,8 @@ export const WIDGET_API_REFERENCE = {
     description: 'Deep merge a patch into a base config',
     params: ['baseConfig: GanttConfig', 'patch: Partial<GanttConfig>'],
     returns: 'Merged GanttConfig',
-    usage: 'const newConfig = api.applyGanttConfigPatch(api.getGanttConfig(), { color: { fixedColor: "#000" } });'
+    usage:
+      'const newConfig = api.applyGanttConfigPatch(api.getGanttConfig(), { color: { fixedColor: "#000" } });'
   },
   setProcessSortMode: {
     description: 'Set process sorting mode',

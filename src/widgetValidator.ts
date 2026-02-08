@@ -1,25 +1,32 @@
+import { Widget } from './types/widget';
+
 /**
  * Widget Validator
- * 
+ *
  * Post-processing validation and auto-fixing for LLM-generated widgets.
  * Inspired by DynaVis's approach to ensure reliable widget generation.
  */
 
 /**
  * Validate and potentially fix a widget object
- * @param {Object} widget - The widget object to validate
- * @param {Array} existingWidgets - Array of existing widgets (for ID conflict check)
- * @returns {{ valid: boolean, widget: Object, errors: string[], warnings: string[], fixes: string[] }}
+ * @param widget - The widget object to validate
+ * @param existingWidgets - Array of existing widgets (for ID conflict check)
  */
-export function validateWidget(widget, existingWidgets = []) {
-  const errors = [];
-  const warnings = [];
-  const fixes = [];
-  let fixedWidget = { ...widget };
+export function validateWidget(widget: Widget | any, existingWidgets: Widget[] = []) {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const fixes: string[] = [];
+  let fixedWidget: any = { ...widget };
 
   // 1. Check required fields
   if (!widget) {
-    return { valid: false, widget: null, errors: ['Widget object is null or undefined'], warnings: [], fixes: [] };
+    return {
+      valid: false,
+      widget: null,
+      errors: ['Widget object is null or undefined'],
+      warnings: [],
+      fixes: []
+    };
   }
 
   if (!widget.id) {
@@ -39,7 +46,7 @@ export function validateWidget(widget, existingWidgets = []) {
   }
 
   // 2. Check for ID conflicts with existing widgets
-  const existingIds = new Set(existingWidgets.map(w => w.id));
+  const existingIds = new Set(existingWidgets.map((w) => w.id));
   if (existingIds.has(fixedWidget.id)) {
     // Auto-fix: Append timestamp to make unique
     const originalId = fixedWidget.id;
@@ -52,7 +59,7 @@ export function validateWidget(widget, existingWidgets = []) {
     const htmlValidation = validateHtml(fixedWidget.html);
     errors.push(...htmlValidation.errors);
     warnings.push(...htmlValidation.warnings);
-    
+
     if (htmlValidation.fixedHtml !== fixedWidget.html) {
       fixedWidget.html = htmlValidation.fixedHtml;
       fixes.push(...htmlValidation.fixes);
@@ -82,7 +89,7 @@ export function validateWidget(widget, existingWidgets = []) {
     if (idConflictValidation.hasConflicts) {
       fixedWidget.html = idConflictValidation.fixedHtml;
       fixedWidget.listeners = updateListenerSelectors(
-        fixedWidget.listeners, 
+        fixedWidget.listeners,
         idConflictValidation.idMap
       );
       fixes.push(...idConflictValidation.fixes);
@@ -101,10 +108,10 @@ export function validateWidget(widget, existingWidgets = []) {
 /**
  * Validate HTML content
  */
-function validateHtml(html) {
-  const errors = [];
-  const warnings = [];
-  const fixes = [];
+function validateHtml(html: string) {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const fixes: string[] = [];
   let fixedHtml = html;
 
   // Check for script tags (security)
@@ -137,11 +144,11 @@ function validateHtml(html) {
 /**
  * Validate listener array
  */
-function validateListeners(listeners) {
-  const errors = [];
-  const warnings = [];
-  const fixes = [];
-  const fixedListeners = [];
+function validateListeners(listeners: any[]) {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const fixes: string[] = [];
+  const fixedListeners: any[] = [];
 
   for (let i = 0; i < listeners.length; i++) {
     const listener = listeners[i];
@@ -184,13 +191,13 @@ function validateListeners(listeners) {
 /**
  * Validate JavaScript handler syntax
  */
-function validateJsHandler(handler) {
+function validateJsHandler(handler: string) {
   try {
     // Try to create a function from the handler to check syntax
     // eslint-disable-next-line no-new-func
     new Function('payload', 'api', 'widget', handler);
     return { valid: true };
-  } catch (error) {
+  } catch (error: any) {
     return { valid: false, error: error.message };
   }
 }
@@ -198,9 +205,9 @@ function validateJsHandler(handler) {
 /**
  * Check for HTML ID conflicts with existing widgets
  */
-function checkHtmlIdConflicts(html, existingWidgets) {
-  const fixes = [];
-  const idMap = {};
+function checkHtmlIdConflicts(html: string, existingWidgets: Widget[]) {
+  const fixes: string[] = [];
+  const idMap: Record<string, string> = {};
   let fixedHtml = html;
   let hasConflicts = false;
 
@@ -217,20 +224,20 @@ function checkHtmlIdConflicts(html, existingWidgets) {
 
   // Find IDs in the new widget HTML
   const newIdMatches = [...html.matchAll(/id\s*=\s*["']([^"']+)["']/gi)];
-  
+
   for (const match of newIdMatches) {
     const originalId = match[1];
     if (existingIds.has(originalId)) {
       hasConflicts = true;
       const newId = `${originalId}-${Date.now()}`;
       idMap[originalId] = newId;
-      
+
       // Replace in HTML (both with quotes types)
       fixedHtml = fixedHtml.replace(
         new RegExp(`id\\s*=\\s*["']${escapeRegex(originalId)}["']`, 'g'),
         `id="${newId}"`
       );
-      
+
       fixes.push(`Renamed HTML element ID from "${originalId}" to "${newId}" to avoid conflict`);
     }
   }
@@ -241,10 +248,10 @@ function checkHtmlIdConflicts(html, existingWidgets) {
 /**
  * Update listener selectors based on ID map
  */
-function updateListenerSelectors(listeners, idMap) {
-  return listeners.map(listener => {
+function updateListenerSelectors(listeners: any[], idMap: Record<string, string>) {
+  return listeners.map((listener) => {
     let updatedSelector = listener.selector;
-    
+
     for (const [oldId, newId] of Object.entries(idMap)) {
       // Update #id selectors
       updatedSelector = updatedSelector.replace(
@@ -252,7 +259,7 @@ function updateListenerSelectors(listeners, idMap) {
         `#${newId}`
       );
     }
-    
+
     // Also update handler if it references IDs
     let updatedHandler = listener.handler;
     for (const [oldId, newId] of Object.entries(idMap)) {
@@ -265,7 +272,7 @@ function updateListenerSelectors(listeners, idMap) {
         `getElementById("${newId}")`
       );
     }
-    
+
     return {
       ...listener,
       selector: updatedSelector,
@@ -277,16 +284,16 @@ function updateListenerSelectors(listeners, idMap) {
 /**
  * Escape special regex characters in a string
  */
-function escapeRegex(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
  * Validate a config patch to ensure it uses valid formats
  */
-export function validateConfigPatch(patch) {
-  const errors = [];
-  const warnings = [];
+export function validateConfigPatch(patch: any) {
+  const errors: string[] = [];
+  const warnings: string[] = [];
 
   if (!patch || typeof patch !== 'object') {
     return { valid: true, errors: [], warnings: [] };
@@ -314,8 +321,8 @@ export function validateConfigPatch(patch) {
 /**
  * Validate color configuration
  */
-function validateColorConfig(colorConfig) {
-  const errors = [];
+function validateColorConfig(colorConfig: any) {
+  const errors: string[] = [];
 
   // Check fixedColor
   if (colorConfig.fixedColor !== undefined && colorConfig.fixedColor !== null) {
@@ -340,10 +347,14 @@ function validateColorConfig(colorConfig) {
   // Check keyRule
   if (colorConfig.keyRule !== undefined) {
     if (typeof colorConfig.keyRule === 'string') {
-      errors.push('color.keyRule must be an expression object, NOT a string. Use: { type: "expr", expr: { op: "get", path: "event.cat" } }');
+      errors.push(
+        'color.keyRule must be an expression object, NOT a string. Use: { type: "expr", expr: { op: "get", path: "event.cat" } }'
+      );
     } else if (typeof colorConfig.keyRule === 'object') {
       if (!colorConfig.keyRule.type && !colorConfig.keyRule.op) {
-        errors.push('color.keyRule must have type:"expr" and expr property, or be a direct expression with "op"');
+        errors.push(
+          'color.keyRule must have type:"expr" and expr property, or be a direct expression with "op"'
+        );
       }
     }
   }
@@ -361,8 +372,8 @@ function validateColorConfig(colorConfig) {
 /**
  * Validate yAxis configuration
  */
-function validateYAxisConfig(yAxisConfig) {
-  const errors = [];
+function validateYAxisConfig(yAxisConfig: any) {
+  const errors: string[] = [];
 
   if (yAxisConfig.processOrderRule !== undefined) {
     if (typeof yAxisConfig.processOrderRule !== 'object') {
@@ -383,31 +394,32 @@ function validateYAxisConfig(yAxisConfig) {
  * Try to extract and validate config patches from handler code
  * This helps catch invalid configs before they're applied
  */
-export function analyzeHandlerForConfigPatches(handler) {
-  const warnings = [];
-  
+export function analyzeHandlerForConfigPatches(handler: string) {
+  const warnings: string[] = [];
+
   // Look for applyGanttConfigPatch calls
   const patchPattern = /applyGanttConfigPatch\s*\([^,]+,\s*(\{[\s\S]*?\})\s*\)/g;
   let match;
-  
+
   while ((match = patchPattern.exec(handler)) !== null) {
     try {
       // Try to parse the patch object (this is approximate)
       const patchStr = match[1];
-      
+
       // Check for common mistakes
       if (/keyRule\s*:\s*['"][^'"]+['"]/.test(patchStr)) {
         warnings.push('Detected keyRule as a string - it should be an expression object');
       }
-      
+
       if (/palette\s*:\s*\[\s*\{/.test(patchStr)) {
-        warnings.push('Detected palette as array of objects - it should be an array of color strings');
+        warnings.push(
+          'Detected palette as array of objects - it should be an array of color strings'
+        );
       }
-      
     } catch (e) {
       // Parsing failed, can't validate
     }
   }
-  
+
   return { warnings };
 }

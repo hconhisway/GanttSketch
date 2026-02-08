@@ -1,0 +1,39 @@
+.widget-editor-modal {
+  z-index: 31;
+}
+
+.widget-editor-window {
+  max-width: 420px;
+  pointer-events: auto;
+}
+
+.widget-editor-header {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  margin: -10px -12px 8px -12px;
+  padding: 10px 12px;
+  border-radius: 8px 8px 0 0;
+}
+
+.widget-editor-textarea {
+  min-height: 200px;
+}
+
+.widget-editor-example {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  color: #4338ca;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.widget-editor-actions {
+  gap: 8px;
+}
+
+.widget-delete-button {
+  background: #fee2e2 !important;
+  color: #b91c1c !important;
+}
+
+.widget-delete-button:hover {
+  background: #fecaca !important;
+}

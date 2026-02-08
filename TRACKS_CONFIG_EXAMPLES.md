@@ -43,15 +43,16 @@ Create hierarchical grouping based on track characteristics:
 
 ```javascript
 // Assuming tracks are named like: "CPU_0", "CPU_1", "GPU_0", "GPU_1", "MEM_0"
-const uniqueTracks = [...new Set(data.map(d => d.track))];
+const uniqueTracks = [...new Set(data.map((d) => d.track))];
 
-const cpuTracks = uniqueTracks.filter(t => t.toString().startsWith('CPU'));
-const gpuTracks = uniqueTracks.filter(t => t.toString().startsWith('GPU'));
-const memTracks = uniqueTracks.filter(t => t.toString().startsWith('MEM'));
-const otherTracks = uniqueTracks.filter(t => 
-  !t.toString().startsWith('CPU') && 
-  !t.toString().startsWith('GPU') && 
-  !t.toString().startsWith('MEM')
+const cpuTracks = uniqueTracks.filter((t) => t.toString().startsWith('CPU'));
+const gpuTracks = uniqueTracks.filter((t) => t.toString().startsWith('GPU'));
+const memTracks = uniqueTracks.filter((t) => t.toString().startsWith('MEM'));
+const otherTracks = uniqueTracks.filter(
+  (t) =>
+    !t.toString().startsWith('CPU') &&
+    !t.toString().startsWith('GPU') &&
+    !t.toString().startsWith('MEM')
 );
 
 setTracksConfig({
@@ -72,7 +73,7 @@ Group tracks based on their utilization patterns:
 ```javascript
 // Calculate average utilization per track
 const trackStats = {};
-data.forEach(d => {
+data.forEach((d) => {
   if (!trackStats[d.track]) {
     trackStats[d.track] = { sum: 0, count: 0 };
   }
@@ -85,7 +86,7 @@ const highUtil = [];
 const mediumUtil = [];
 const lowUtil = [];
 
-Object.keys(trackStats).forEach(track => {
+Object.keys(trackStats).forEach((track) => {
   const avg = trackStats[track].sum / trackStats[track].count;
   if (avg >= 0.8) {
     highUtil.push(track);
@@ -113,7 +114,7 @@ Sort tracks by their total utilization (most active first):
 ```javascript
 // Calculate total utilization per track
 const trackTotals = {};
-data.forEach(d => {
+data.forEach((d) => {
   if (!trackTotals[d.track]) {
     trackTotals[d.track] = 0;
   }
@@ -141,7 +142,7 @@ setTracksConfig({
     const isNumeric = !isNaN(num);
     const isEven = num % 2 === 0;
     const inRange = num >= 0 && num <= 50;
-    
+
     // Only show numeric, even tracks between 0-50
     return isNumeric && isEven && inRange;
   }
@@ -156,18 +157,18 @@ Show only the N most active tracks:
 function showTopNTracks(n) {
   // Calculate activity per track (count of data points)
   const trackActivity = {};
-  data.forEach(d => {
+  data.forEach((d) => {
     trackActivity[d.track] = (trackActivity[d.track] || 0) + 1;
   });
-  
+
   // Sort tracks by activity
-  const sortedTracks = Object.keys(trackActivity).sort((a, b) => 
-    trackActivity[b] - trackActivity[a]
+  const sortedTracks = Object.keys(trackActivity).sort(
+    (a, b) => trackActivity[b] - trackActivity[a]
   );
-  
+
   // Take top N
   const topN = sortedTracks.slice(0, n);
-  
+
   setTracksConfig({
     trackList: topN
   });
@@ -194,7 +195,7 @@ setTracksConfig({
 Create alternating groups for visual distinction:
 
 ```javascript
-const uniqueTracks = [...new Set(data.map(d => d.track))].sort();
+const uniqueTracks = [...new Set(data.map((d) => d.track))].sort();
 const evenTracks = uniqueTracks.filter((_, idx) => idx % 2 === 0);
 const oddTracks = uniqueTracks.filter((_, idx) => idx % 2 === 1);
 
@@ -213,20 +214,20 @@ Automatically detect and group tracks by common prefixes:
 
 ```javascript
 function autoGroupByPrefix() {
-  const uniqueTracks = [...new Set(data.map(d => d.track))];
+  const uniqueTracks = [...new Set(data.map((d) => d.track))];
   const prefixMap = {};
-  
-  uniqueTracks.forEach(track => {
+
+  uniqueTracks.forEach((track) => {
     const trackStr = track.toString();
     const match = trackStr.match(/^([A-Za-z]+)/);
     const prefix = match ? match[1] : 'Other';
-    
+
     if (!prefixMap[prefix]) {
       prefixMap[prefix] = [];
     }
     prefixMap[prefix].push(track);
   });
-  
+
   const groups = Object.keys(prefixMap)
     .sort()
     .map((prefix, idx) => ({
@@ -234,7 +235,7 @@ function autoGroupByPrefix() {
       tracks: prefixMap[prefix].sort(),
       order: idx
     }));
-  
+
   setTracksConfig({
     sortMode: 'grouped',
     groups: groups
@@ -251,17 +252,17 @@ Show tracks that have activity in a specific time range:
 ```javascript
 function showTracksActiveInTimeRange(startTime, endTime) {
   const activeTracks = new Set();
-  
-  data.forEach(d => {
+
+  data.forEach((d) => {
     const dataStart = d.timeStart.getTime();
     const dataEnd = d.timeEnd.getTime();
-    
+
     // Check if this data point overlaps with our time range
     if (dataStart <= endTime && dataEnd >= startTime) {
       activeTracks.add(d.track);
     }
   });
-  
+
   setTracksConfig({
     trackList: Array.from(activeTracks).sort()
   });
@@ -279,9 +280,9 @@ Combine multiple configuration options:
 
 ```javascript
 // Show only numeric tracks, sorted by value, in groups of 10
-const uniqueTracks = [...new Set(data.map(d => d.track))];
+const uniqueTracks = [...new Set(data.map((d) => d.track))];
 const numericTracks = uniqueTracks
-  .filter(t => !isNaN(parseFloat(t)))
+  .filter((t) => !isNaN(parseFloat(t)))
   .sort((a, b) => parseFloat(a) - parseFloat(b));
 
 const groupSize = 10;
@@ -310,7 +311,7 @@ Here's how to integrate these examples into a React component:
 // Add a button to apply a configuration
 const applyHighUtilizationFilter = () => {
   const trackStats = {};
-  data.forEach(d => {
+  data.forEach((d) => {
     if (!trackStats[d.track]) {
       trackStats[d.track] = { sum: 0, count: 0 };
     }
@@ -329,9 +330,7 @@ const applyHighUtilizationFilter = () => {
 };
 
 // In your JSX:
-<button onClick={applyHighUtilizationFilter}>
-  Show High Utilization Only
-</button>
+<button onClick={applyHighUtilizationFilter}>Show High Utilization Only</button>;
 ```
 
 ## Performance Tips
@@ -359,7 +358,7 @@ useEffect(() => {
       filter: (track) => track.toString().includes(filterText)
     });
   }, 300);
-  
+
   return () => clearTimeout(timer);
 }, [filterText]);
 ```
@@ -369,13 +368,17 @@ useEffect(() => {
 ## Troubleshooting Advanced Configurations
 
 ### Issue: Custom sort not working as expected
+
 **Solution**: Ensure your sort function returns a number (not boolean). Use subtraction for numbers, `.localeCompare()` for strings.
 
 ### Issue: Grouped mode not showing separators
+
 **Solution**: Verify that `sortMode` is set to `'grouped'` and that each group has at least one track that exists in the data.
 
 ### Issue: Filter removing all tracks
+
 **Solution**: Log the filter function's results to debug:
+
 ```javascript
 filter: (track) => {
   const result = /* your filter logic */;
@@ -387,4 +390,3 @@ filter: (track) => {
 ## Conclusion
 
 These examples demonstrate the flexibility of the tracks configuration system. You can combine sorting, filtering, and grouping to create exactly the view you need for your Gantt chart data. Experiment with these patterns and adapt them to your specific use case!
-

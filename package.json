@@ -5,10 +5,15 @@
   "dependencies": {
     "@observablehq/plot": "^0.6.13",
     "@observablehq/runtime": "^5.9.0",
+    "@types/d3": "^7.4.3",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
     "d3": "^7.8.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-scripts": "5.0.1"
+    "react-scripts": "5.0.1",
+    "react-window": "^2.2.6",
+    "typescript": "^5.9.3"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -18,7 +23,9 @@
   },
   "eslintConfig": {
     "extends": [
-      "react-app"
+      "react-app",
+      "react-app/jest",
+      "prettier"
     ]
   },
   "browserslist": {
@@ -32,6 +39,16 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^30.0.0",
+    "@types/react-window": "^1.8.8",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1"
   }
 }
-

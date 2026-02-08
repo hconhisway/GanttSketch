@@ -7,19 +7,25 @@ GanttSketch now features an intelligent LLM-powered system that can understand y
 ## How It Works
 
 ### 1. **Understanding User Intent**
+
 The LLM analyzes:
+
 - **Natural language**: Your text description of what you want
 - **Visual context**: Annotations and drawings on the chart (when using vision-capable models)
 - **Chart context**: Current tracks, time ranges, and data
 
 ### 2. **Generating Configuration**
+
 Based on your input, the LLM generates a structured JSON configuration that specifies:
+
 - Sorting preferences
 - Filter criteria
 - Grouping arrangements
 
 ### 3. **Automatic Application**
+
 The system automatically:
+
 - Parses the LLM's response
 - Converts it to internal configuration format
 - Applies the configuration to the chart
@@ -30,11 +36,13 @@ The system automatically:
 ### Example 1: Simple Filtering
 
 **You type:**
+
 ```
 Show only tracks 5 to 15
 ```
 
 **LLM responds with:**
+
 ```json
 {
   "action": "configure_tracks",
@@ -56,11 +64,13 @@ Show only tracks 5 to 15
 ### Example 2: Pattern Matching
 
 **You type:**
+
 ```
 Show me all CPU tracks
 ```
 
 **LLM responds with:**
+
 ```json
 {
   "action": "configure_tracks",
@@ -82,11 +92,13 @@ Show me all CPU tracks
 ### Example 3: Top Performers
 
 **You type:**
+
 ```
 Show me the 5 busiest tracks
 ```
 
 **LLM responds with:**
+
 ```json
 {
   "action": "configure_tracks",
@@ -109,11 +121,13 @@ Show me the 5 busiest tracks
 ### Example 4: Grouping
 
 **You type:**
+
 ```
 Group tracks into High (0-5), Medium (6-10), and Low priority (11-15)
 ```
 
 **LLM responds with:**
+
 ```json
 {
   "action": "configure_tracks",
@@ -142,6 +156,7 @@ Group tracks into High (0-5), Medium (6-10), and Low priority (11-15)
 ```
 
 **Result:** Chart displays tracks in three distinct groups with:
+
 - Bold colored group labels on the left ("High Priority", "Medium Priority", "Low Priority")
 - Alternating background colors for each group region
 - Dashed separator lines between groups
@@ -151,12 +166,14 @@ Group tracks into High (0-5), Medium (6-10), and Low priority (11-15)
 ### Example 5: Visual Annotation (Vision Models)
 
 **You do:**
+
 1. Enable drawing mode
 2. Circle tracks 3, 7, and 12 on the chart
 3. Capture the image
 4. Send message: "Show only these tracks"
 
 **LLM analyzes the image and responds:**
+
 ```json
 {
   "action": "configure_tracks",
@@ -180,6 +197,7 @@ Group tracks into High (0-5), Medium (6-10), and Low priority (11-15)
 ### Filter Types
 
 #### 1. **Range Filter**
+
 Show tracks within a numeric range.
 
 ```json
@@ -190,11 +208,13 @@ Show tracks within a numeric range.
 ```
 
 **Natural language examples:**
+
 - "Show tracks 0 to 10"
 - "Display tracks between 5 and 15"
 - "Filter to tracks in range 20-30"
 
 #### 2. **List Filter**
+
 Show specific tracks by name.
 
 ```json
@@ -205,11 +225,13 @@ Show specific tracks by name.
 ```
 
 **Natural language examples:**
+
 - "Show only tracks 1, 5, and 9"
 - "Display tracks A, B, and C"
 - "Filter to tracks: CPU_0, CPU_1, GPU_0"
 
 #### 3. **Pattern Filter**
+
 Show tracks matching a regex pattern.
 
 ```json
@@ -220,11 +242,13 @@ Show tracks matching a regex pattern.
 ```
 
 **Natural language examples:**
+
 - "Show all CPU tracks"
 - "Display tracks starting with GPU"
 - "Filter to tracks containing 'memory'"
 
 #### 4. **Function Filter**
+
 Apply predefined filter functions.
 
 ```json
@@ -235,12 +259,14 @@ Apply predefined filter functions.
 ```
 
 **Available functions:**
+
 - `numeric_only`: Show only numerically-named tracks
 - `even_only`: Show only even-numbered tracks
 - `odd_only`: Show only odd-numbered tracks
 - `top_n_utilization`: Show N tracks with highest utilization
 
 **Natural language examples:**
+
 - "Show only even tracks"
 - "Display numeric tracks only"
 - "Show the 10 most active tracks"
@@ -248,6 +274,7 @@ Apply predefined filter functions.
 ### Sort Modes
 
 #### 1. **Ascending (asc)**
+
 Sort tracks from smallest to largest, A-Z.
 
 ```json
@@ -255,11 +282,13 @@ Sort tracks from smallest to largest, A-Z.
 ```
 
 **Natural language examples:**
+
 - "Sort tracks ascending"
 - "Order tracks from low to high"
 - "Sort alphabetically"
 
 #### 2. **Descending (desc)**
+
 Sort tracks from largest to smallest, Z-A.
 
 ```json
@@ -267,11 +296,13 @@ Sort tracks from largest to smallest, Z-A.
 ```
 
 **Natural language examples:**
+
 - "Sort tracks descending"
 - "Order tracks from high to low"
 - "Reverse sort"
 
 #### 3. **Grouped**
+
 Organize tracks into named groups with rich visual indicators.
 
 ```json
@@ -282,49 +313,63 @@ Organize tracks into named groups with rich visual indicators.
 ```
 
 **Visual Effects:**
+
 - Bold, colored group labels on the left side of Y-axis
 - Alternating subtle background colors (light gray/white)
 - Dashed separator lines between groups
 - Increased left margin to accommodate labels
 
 **Natural language examples:**
+
 - "Group tracks by priority"
 - "Organize into categories"
 - "Split into high and low groups"
 - "Create groups: critical (0-5) and normal (6-10)"
 
 **Group Naming:**
+
 - Use descriptive names when context is clear: "High Priority", "CPU Resources"
 - Use numbered defaults when no context: "Group 1", "Group 2"
 
 ## Tips for Best Results
 
 ### 1. **Be Specific**
+
 ❌ Bad: "Filter the chart"
 ✅ Good: "Show only tracks 5-10"
 
 ### 2. **Use Track Names**
+
 If you know the exact track identifiers:
+
 - "Show tracks CPU_0, CPU_1, and GPU_0"
 - "Display tracks 5, 7, and 9"
 
 ### 3. **Describe Patterns**
+
 For pattern-based filtering:
+
 - "Show all tracks starting with GPU"
 - "Display tracks containing 'memory'"
 
 ### 4. **Specify Quantities**
+
 When asking for top/bottom:
+
 - "Show the 5 busiest tracks"
 - "Display the top 10 tracks by utilization"
 
 ### 5. **Group Clearly**
+
 When creating groups:
+
 - "Group tracks 0-5 as 'High Priority' and 6-10 as 'Low Priority'"
 - "Organize into CPU group (tracks A, B) and GPU group (tracks X, Y)"
 
 ### 6. **Use Visual Annotations**
+
 With vision-capable models:
+
 1. Draw circles around tracks of interest
 2. Use different colors for different groups
 3. Draw arrows to highlight relationships
@@ -364,6 +409,7 @@ The system uses `src/tracksConfigPrompt.js` which contains:
 ### Internal Format
 
 LLM output format:
+
 ```json
 {
   "action": "configure_tracks",
@@ -372,6 +418,7 @@ LLM output format:
 ```
 
 Internal format (React state):
+
 ```javascript
 {
   sortMode: 'asc' | 'desc' | 'custom' | 'grouped',
@@ -385,22 +432,28 @@ Internal format (React state):
 ## LLM Provider Requirements
 
 ### Basic Functionality
+
 Works with any LLM that can:
+
 - Follow instructions
 - Generate JSON
 - Understand natural language
 
 **Supported models:**
+
 - GPT-4, GPT-3.5 (OpenAI)
 - Claude 3 (Anthropic)
 - Local models via Ollama
 
 ### Vision Capabilities
+
 For sketch/annotation understanding:
+
 - GPT-4 Vision (OpenAI)
 - Claude 3 Opus/Sonnet (Anthropic)
 
 **Note:** Vision capabilities require:
+
 1. Drawing module enabled
 2. Image capture functionality
 3. Vision-capable LLM configured
@@ -413,6 +466,7 @@ For sketch/annotation understanding:
 **Problem:** LLM responds but chart doesn't update
 
 **Solutions:**
+
 1. Check browser console for errors
 2. Verify LLM response contains valid JSON
 3. Ensure track names in config match actual tracks
@@ -423,6 +477,7 @@ For sketch/annotation understanding:
 **Problem:** Wrong tracks are shown
 
 **Solutions:**
+
 1. Be more specific in your request
 2. Check track names/numbers match your data
 3. Review the configuration in console logs
@@ -433,6 +488,7 @@ For sketch/annotation understanding:
 **Problem:** LLM gives general answer instead of configuration
 
 **Solutions:**
+
 1. Use clearer language: "Configure tracks to show..."
 2. Explicitly mention filtering, sorting, or grouping
 3. Provide specific track names or numbers
@@ -443,6 +499,7 @@ For sketch/annotation understanding:
 **Problem:** LLM doesn't understand your sketch
 
 **Solutions:**
+
 1. Ensure you're using a vision-capable model
 2. Verify image is captured correctly
 3. Make annotations clear and obvious
@@ -451,26 +508,31 @@ For sketch/annotation understanding:
 ## Examples of Powerful Queries
 
 ### Complex Filtering
+
 ```
 "Show tracks 0-10 excluding 5 and 7, sorted descending"
 ```
 
 ### Multi-Group Organization
+
 ```
 "Group tracks into: Critical (0-3), Important (4-7), Normal (8-15), and Low (16+)"
 ```
 
 ### Dynamic Analysis
+
 ```
 "Show me the top 5 tracks with the most activity in the current time range"
 ```
 
 ### Pattern + Range
+
 ```
 "Show CPU tracks numbered between 0 and 10"
 ```
 
 ### Conditional Grouping
+
 ```
 "Group even tracks as Group A and odd tracks as Group B"
 ```
@@ -495,6 +557,7 @@ For sketch/annotation understanding:
 ## Future Enhancements
 
 Planned features:
+
 - [ ] Save and name configurations
 - [ ] Configuration presets library
 - [ ] Multi-step configuration workflows
@@ -506,6 +569,7 @@ Planned features:
 ## Support
 
 For issues or questions:
+
 1. Check the console logs for detailed errors
 2. Review the LLM's full response in chat
 3. Try rephrasing your request
@@ -515,4 +579,3 @@ For issues or questions:
 ---
 
 **Enjoy intelligent, conversational chart configuration! 🤖✨**
-

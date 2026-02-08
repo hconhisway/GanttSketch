@@ -1,4 +1,6 @@
-export const DEFAULT_GANTT_CONFIG = {
+import { GanttConfig } from './types/ganttConfig';
+
+export const DEFAULT_GANTT_CONFIG: GanttConfig = {
   layout: {
     margin: { top: 24, right: 24, bottom: 24, left: 16 },
     headerHeight: 24,
@@ -72,7 +74,7 @@ export const DEFAULT_GANTT_CONFIG = {
       '#16A34A', // green
       '#CA8A04', // deep amber
       '#EA580C', // deep orange
-      '#B91C1C'  // deep red
+      '#B91C1C' // deep red
     ],
     keyRule: {
       type: 'expr',
@@ -106,7 +108,10 @@ export const DEFAULT_GANTT_CONFIG = {
       title: 'Process',
       fields: [
         { label: 'Process', value: { op: 'var', name: 'pid' } },
-        { label: 'Duration', value: { op: 'formatDurationUs', args: [{ op: 'var', name: 'durationUs' }] } }
+        {
+          label: 'Duration',
+          value: { op: 'formatDurationUs', args: [{ op: 'var', name: 'durationUs' }] }
+        }
       ]
     },
     event: {
@@ -114,8 +119,14 @@ export const DEFAULT_GANTT_CONFIG = {
       fields: [
         { label: 'Name', value: { op: 'get', path: 'event.name' } },
         { label: 'Category', value: { op: 'get', path: 'event.cat' } },
-        { label: 'Start time', value: { op: 'formatTimeUsFull', args: [{ op: 'var', name: 'startUs' }] } },
-        { label: 'Duration', value: { op: 'formatDurationUs', args: [{ op: 'var', name: 'durationUs' }] } },
+        {
+          label: 'Start time',
+          value: { op: 'formatTimeUsFull', args: [{ op: 'var', name: 'startUs' }] }
+        },
+        {
+          label: 'Duration',
+          value: { op: 'formatDurationUs', args: [{ op: 'var', name: 'durationUs' }] }
+        },
         { label: 'Thread', value: { op: 'var', name: 'tid' } },
         { label: 'Process', value: { op: 'var', name: 'pid' } },
         { label: 'SQL ID', value: { op: 'var', name: 'sqlId' } }
@@ -133,18 +144,18 @@ export const DEFAULT_GANTT_CONFIG = {
 
 export const GANTT_CONFIG = DEFAULT_GANTT_CONFIG;
 
-export function cloneGanttConfig() {
+export function cloneGanttConfig(): GanttConfig {
   return JSON.parse(JSON.stringify(DEFAULT_GANTT_CONFIG));
 }
 
-function getArrayItemKey(item) {
+function getArrayItemKey(item: any): string {
   if (!item || typeof item !== 'object') return '';
   return String(item.id || item.key || item.label || item.name || item.path || '');
 }
 
-function mergeObjectArray(baseArray, patchArray) {
+function mergeObjectArray(baseArray: any, patchArray: any): any[] {
   const baseList = Array.isArray(baseArray) ? baseArray : [];
-  const keyFor = (item) => {
+  const keyFor = (item: any) => {
     const key = getArrayItemKey(item);
     if (key) return key;
     try {
@@ -155,18 +166,18 @@ function mergeObjectArray(baseArray, patchArray) {
   };
 
   const baseByKey = new Map();
-  baseList.forEach((item) => {
+  baseList.forEach((item: any) => {
     const key = keyFor(item);
     if (key && !baseByKey.has(key)) {
       baseByKey.set(key, item);
     }
   });
 
-  const ordered = [];
+  const ordered: any[] = [];
   const usedKeys = new Set();
   const deletedKeys = new Set();
 
-  patchArray.forEach((item) => {
+  patchArray.forEach((item: any) => {
     if (!item || typeof item !== 'object') return;
     const key = keyFor(item);
     const shouldDelete = item._delete === true || item.__delete === true;
@@ -184,7 +195,7 @@ function mergeObjectArray(baseArray, patchArray) {
     }
   });
 
-  baseList.forEach((item) => {
+  baseList.forEach((item: any) => {
     const key = keyFor(item);
     if (key) {
       if (deletedKeys.has(key)) return;
@@ -196,7 +207,7 @@ function mergeObjectArray(baseArray, patchArray) {
   return ordered;
 }
 
-function mergeDeep(base, patch) {
+function mergeDeep(base: any, patch: any): any {
   if (patch === undefined) return base;
   if (Array.isArray(base) && patch && typeof patch === 'object') {
     if (patch.__replace === true) {
@@ -210,10 +221,10 @@ function mergeDeep(base, patch) {
     return [...patch];
   }
   if (!patch || typeof patch !== 'object') return patch;
-  const baseObj = (base && typeof base === 'object' && !Array.isArray(base)) ? base : {};
-  const next = { ...baseObj };
+  const baseObj = base && typeof base === 'object' && !Array.isArray(base) ? base : {};
+  const next: Record<string, any> = { ...baseObj };
   for (const [key, value] of Object.entries(patch)) {
-    const baseValue = baseObj[key];
+    const baseValue = (baseObj as any)[key];
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       next[key] = mergeDeep(baseValue, value);
     } else {
@@ -223,7 +234,7 @@ function mergeDeep(base, patch) {
   return next;
 }
 
-export function applyGanttConfigPatch(baseConfig, patch) {
+export function applyGanttConfigPatch(baseConfig: GanttConfig, patch: any): GanttConfig {
   if (!patch || typeof patch !== 'object') return baseConfig;
   return mergeDeep(baseConfig, patch);
 }
@@ -483,4 +494,3 @@ Each event can include:
 See src/GANTT_CONFIG_SPEC.json for the full spec.
 
 If the user intent is ambiguous, ask a clarifying question instead of guessing.`;
-

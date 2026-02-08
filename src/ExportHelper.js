@@ -5,19 +5,19 @@
 export async function exportDOMToCanvas(containerElement, drawings) {
   try {
     console.log('=== Starting Chart Export ===');
-    
+
     // Get the chart div
     const chartDiv = containerElement.querySelector('.chart');
     if (!chartDiv) {
       console.error('❌ Chart div not found');
       return null;
     }
-    
+
     console.log('✓ Chart div found');
 
     // Observable Plot returns a <figure> element containing an SVG
     const figure = chartDiv.querySelector('figure');
-    
+
     if (!figure) {
       console.error('❌ Figure element not found');
       console.log('Looking for direct SVG instead...');
@@ -27,12 +27,12 @@ export async function exportDOMToCanvas(containerElement, drawings) {
     // Get the SVG - need to find the MAIN chart SVG, not legend swatches
     // Observable Plot's figure contains multiple SVGs: the main chart + legend swatches
     let svg = null;
-    
+
     if (figure) {
       // Find all SVGs in the figure
       const svgsInFigure = Array.from(figure.querySelectorAll('svg'));
       console.log('Found', svgsInFigure.length, 'SVG elements in figure');
-      
+
       // Pick the largest one (main chart is biggest)
       let maxArea = 0;
       for (const svgEl of svgsInFigure) {
@@ -61,13 +61,13 @@ export async function exportDOMToCanvas(containerElement, drawings) {
         }
       }
     }
-    
+
     if (!svg) {
       console.error('❌ SVG not found');
       console.log('Chart div HTML:', chartDiv.innerHTML.substring(0, 500));
       return null;
     }
-    
+
     console.log('✓ Main chart SVG selected (largest)');
     console.log('SVG class:', svg.getAttribute('class'));
     console.log('SVG has children:', svg.children.length);
@@ -76,7 +76,7 @@ export async function exportDOMToCanvas(containerElement, drawings) {
     let exportElement = svg;
     let width = 0;
     let height = 0;
-    
+
     // If there's a figure, export the entire figure (includes chart + legend)
     if (figure) {
       exportElement = figure;
@@ -92,7 +92,7 @@ export async function exportDOMToCanvas(containerElement, drawings) {
       height = Math.round(svgRect.height);
       console.log('SVG BBox dimensions:', width, 'x', height);
     }
-    
+
     // Try 3: Get from SVG width/height attributes
     if (width === 0 || height === 0) {
       const attrWidth = svg.getAttribute('width');
@@ -103,7 +103,7 @@ export async function exportDOMToCanvas(containerElement, drawings) {
         console.log('SVG attribute dimensions:', width, 'x', height);
       }
     }
-    
+
     // Try 4: Get from viewBox
     if (width === 0 || height === 0) {
       const viewBox = svg.getAttribute('viewBox');
@@ -116,7 +116,7 @@ export async function exportDOMToCanvas(containerElement, drawings) {
         }
       }
     }
-    
+
     console.log('Final dimensions:', width, 'x', height);
     console.log('SVG width attr:', svg.getAttribute('width'));
     console.log('SVG height attr:', svg.getAttribute('height'));
@@ -134,7 +134,7 @@ export async function exportDOMToCanvas(containerElement, drawings) {
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d', { alpha: false });
-    
+
     if (!ctx) {
       console.error('❌ Could not get canvas context');
       return null;
@@ -148,32 +148,34 @@ export async function exportDOMToCanvas(containerElement, drawings) {
 
     // Create wrapper SVG for export
     let finalSVG;
-    
+
     if (exportElement === figure) {
       // Export the entire figure (chart + legend) using foreignObject
       console.log('Creating SVG wrapper for figure (includes legend)...');
-      
+
       finalSVG = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       finalSVG.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
       finalSVG.setAttribute('width', width.toString());
       finalSVG.setAttribute('height', height.toString());
-      
+
       // Clone the figure
       const figureClone = figure.cloneNode(true);
       inlineAllStyles(figure, figureClone);
-      
+
       // Find the main SVG in the cloned figure to add drawings
       const clonedSVGs = Array.from(figureClone.querySelectorAll('svg'));
       let mainSVGClone = null;
       let maxArea = 0;
       for (const svgEl of clonedSVGs) {
-        const area = parseFloat(svgEl.getAttribute('width') || 0) * parseFloat(svgEl.getAttribute('height') || 0);
+        const area =
+          parseFloat(svgEl.getAttribute('width') || 0) *
+          parseFloat(svgEl.getAttribute('height') || 0);
         if (area > maxArea) {
           maxArea = area;
           mainSVGClone = svgEl;
         }
       }
-      
+
       // Wrap figure in foreignObject
       const foreignObject = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
       foreignObject.setAttribute('width', width.toString());
@@ -182,7 +184,7 @@ export async function exportDOMToCanvas(containerElement, drawings) {
       foreignObject.setAttribute('y', '0');
       foreignObject.appendChild(figureClone);
       finalSVG.appendChild(foreignObject);
-      
+
       // Now add drawings to the main SVG clone if found
       if (mainSVGClone && drawings && drawings.length > 0) {
         console.log('Adding drawings to main SVG within figure...');
@@ -192,17 +194,17 @@ export async function exportDOMToCanvas(containerElement, drawings) {
       // Export just the SVG (no figure)
       console.log('Exporting SVG only...');
       finalSVG = svg.cloneNode(true);
-      
+
       // Set proper SVG attributes
       finalSVG.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
       finalSVG.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
       finalSVG.setAttribute('width', width.toString());
       finalSVG.setAttribute('height', height.toString());
-      
+
       // Inline all styles
       console.log('Inlining styles...');
       inlineAllStyles(svg, finalSVG);
-      
+
       // Add drawings
       if (drawings && drawings.length > 0) {
         addDrawingsToSVG(finalSVG, drawings, containerElement, svg);
@@ -212,17 +214,17 @@ export async function exportDOMToCanvas(containerElement, drawings) {
     // Serialize SVG
     const serializer = new XMLSerializer();
     let svgString = serializer.serializeToString(finalSVG);
-    
+
     console.log('✓ SVG serialized, length:', svgString.length);
     console.log('Preview:', svgString.substring(0, 200));
-    
+
     // Create data URL
     const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
 
     // Load and render
     return new Promise((resolve, reject) => {
       const img = new Image();
-      
+
       const timeout = setTimeout(() => {
         console.error('⏱️ Timeout after 15s');
         reject(new Error('Timeout'));
@@ -232,34 +234,34 @@ export async function exportDOMToCanvas(containerElement, drawings) {
         clearTimeout(timeout);
         console.log('✅ Image loaded:', img.naturalWidth, 'x', img.naturalHeight);
         console.log('Drawing to canvas:', width, 'x', height);
-        
+
         try {
           // Draw to canvas
           ctx.drawImage(img, 0, 0, width, height);
-          
+
           // Verify content
-          const sample = ctx.getImageData(
-            Math.floor(width / 2), 
-            Math.floor(height / 2), 
-            1, 1
-          );
+          const sample = ctx.getImageData(Math.floor(width / 2), Math.floor(height / 2), 1, 1);
           console.log('Center pixel:', Array.from(sample.data).slice(0, 3));
-          
+
           // Check if we have actual content (not just white)
-          const hasContent = sample.data[0] !== 255 || sample.data[1] !== 255 || sample.data[2] !== 255;
+          const hasContent =
+            sample.data[0] !== 255 || sample.data[1] !== 255 || sample.data[2] !== 255;
           console.log('Has non-white content:', hasContent);
-          
+
           // Convert to PNG
-          canvas.toBlob((blob) => {
-            if (blob) {
-              console.log('✅ Export complete!', (blob.size / 1024).toFixed(1), 'KB');
-              resolve(blob);
-            } else {
-              console.error('❌ Blob creation failed');
-              reject(new Error('Blob creation failed'));
-            }
-          }, 'image/png', 1.0);
-          
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                console.log('✅ Export complete!', (blob.size / 1024).toFixed(1), 'KB');
+                resolve(blob);
+              } else {
+                console.error('❌ Blob creation failed');
+                reject(new Error('Blob creation failed'));
+              }
+            },
+            'image/png',
+            1.0
+          );
         } catch (err) {
           console.error('❌ Canvas error:', err);
           reject(err);
@@ -277,7 +279,6 @@ export async function exportDOMToCanvas(containerElement, drawings) {
       img.src = svgDataUrl;
       console.log('Loading image from data URL...');
     });
-
   } catch (error) {
     console.error('❌ Fatal error:', error);
     console.error(error.stack);
@@ -290,50 +291,56 @@ export async function exportDOMToCanvas(containerElement, drawings) {
  */
 function addDrawingsToSVG(svgElement, drawings, containerElement, originalSVG) {
   console.log('Adding', drawings.length, 'annotations...');
-  
+
   // Get the drawing overlay and chart SVG positions
   const drawingOverlay = containerElement.querySelector('.gantt-drawing-canvas-overlay');
-  
+
   if (!drawingOverlay) {
     console.warn('Drawing overlay not found, adding paths without transformation');
   }
-  
+
   // Get actual screen positions
   const overlayRect = drawingOverlay ? drawingOverlay.getBoundingClientRect() : null;
   const svgRect = originalSVG.getBoundingClientRect();
-  
-  console.log('Drawing overlay rect:', overlayRect ? 
-    `${overlayRect.width}x${overlayRect.height} at (${overlayRect.left}, ${overlayRect.top})` : 
-    'not found');
-  console.log('Chart SVG rect:', `${svgRect.width}x${svgRect.height} at (${svgRect.left}, ${svgRect.top})`);
-  
+
+  console.log(
+    'Drawing overlay rect:',
+    overlayRect
+      ? `${overlayRect.width}x${overlayRect.height} at (${overlayRect.left}, ${overlayRect.top})`
+      : 'not found'
+  );
+  console.log(
+    'Chart SVG rect:',
+    `${svgRect.width}x${svgRect.height} at (${svgRect.left}, ${svgRect.top})`
+  );
+
   // Get SVG dimensions for scaling
   const svgWidth = parseFloat(svgElement.getAttribute('width')) || svgRect.width;
   const svgHeight = parseFloat(svgElement.getAttribute('height')) || svgRect.height;
-  
+
   // Calculate transformation parameters
   let scaleX = 1;
   let scaleY = 1;
   let offsetX = 0;
   let offsetY = 0;
-  
+
   if (overlayRect && svgRect) {
     console.log('=== Coordinate Mapping ===');
     // Scale from overlay screen size to SVG screen size, then to export size
     scaleX = svgWidth / overlayRect.width;
     scaleY = svgHeight / overlayRect.height;
-    
+
     // Position offset
     const posOffsetX = overlayRect.left - svgRect.left;
     const posOffsetY = overlayRect.top - svgRect.top;
-    
+
     offsetX = posOffsetX * scaleX;
     offsetY = posOffsetY * scaleY;
-    
+
     console.log('  Scale:', scaleX.toFixed(6), 'x', scaleY.toFixed(6));
     console.log('  Offset:', offsetX.toFixed(3), ',', offsetY.toFixed(3));
   }
-  
+
   const annotationsGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   annotationsGroup.setAttribute('class', 'export-annotations');
 
@@ -341,21 +348,24 @@ function addDrawingsToSVG(svgElement, drawings, containerElement, originalSVG) {
   drawings.forEach((pathData, index) => {
     if (pathData && pathData.path) {
       const transformedPath = transformPathCoordinates(
-        pathData.path, 
-        scaleX, 
-        scaleY, 
-        offsetX, 
+        pathData.path,
+        scaleX,
+        scaleY,
+        offsetX,
         offsetY
       );
-      
+
       if (index === 0) {
         console.log('First path transform example:', pathData.path.substring(0, 80), '...');
       }
-      
+
       const pathElement = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       pathElement.setAttribute('d', transformedPath);
       pathElement.setAttribute('stroke', pathData.color || '#ff0000');
-      pathElement.setAttribute('stroke-width', ((pathData.width || 3) * Math.max(scaleX, scaleY)).toString());
+      pathElement.setAttribute(
+        'stroke-width',
+        ((pathData.width || 3) * Math.max(scaleX, scaleY)).toString()
+      );
       pathElement.setAttribute('fill', 'none');
       pathElement.setAttribute('stroke-linecap', 'round');
       pathElement.setAttribute('stroke-linejoin', 'round');
@@ -388,19 +398,31 @@ function transformPathCoordinates(pathString, scaleX, scaleY, offsetX, offsetY) 
  */
 function inlineAllStyles(sourceElement, targetElement) {
   if (!sourceElement || !targetElement) return;
-  
+
   try {
     const computed = window.getComputedStyle(sourceElement);
     const tagName = sourceElement.tagName.toLowerCase();
-    
+
     // For SVG elements, copy important properties
     if (tagName === 'svg' || sourceElement.namespaceURI === 'http://www.w3.org/2000/svg') {
       const svgProps = [
-        'fill', 'stroke', 'stroke-width', 'stroke-opacity', 'fill-opacity',
-        'opacity', 'font-family', 'font-size', 'font-weight', 'font-style',
-        'text-anchor', 'dominant-baseline', 'color', 'display', 'visibility'
+        'fill',
+        'stroke',
+        'stroke-width',
+        'stroke-opacity',
+        'fill-opacity',
+        'opacity',
+        'font-family',
+        'font-size',
+        'font-weight',
+        'font-style',
+        'text-anchor',
+        'dominant-baseline',
+        'color',
+        'display',
+        'visibility'
       ];
-      
+
       for (const prop of svgProps) {
         const value = computed.getPropertyValue(prop);
         if (value && value !== 'none' && value !== '') {
@@ -411,7 +433,7 @@ function inlineAllStyles(sourceElement, targetElement) {
           }
         }
       }
-      
+
       // Copy presentation attributes
       const attrs = ['fill', 'stroke', 'stroke-width', 'opacity', 'transform'];
       for (const attr of attrs) {
@@ -424,10 +446,7 @@ function inlineAllStyles(sourceElement, targetElement) {
       for (let i = 0; i < computed.length; i++) {
         const prop = computed[i];
         try {
-          targetElement.style.setProperty(
-            prop,
-            computed.getPropertyValue(prop)
-          );
+          targetElement.style.setProperty(prop, computed.getPropertyValue(prop));
         } catch (e) {
           // Skip
         }
@@ -436,11 +455,11 @@ function inlineAllStyles(sourceElement, targetElement) {
   } catch (e) {
     // Silently skip errors
   }
-  
+
   // Recursively process children
   const sourceChildren = Array.from(sourceElement.children || []);
   const targetChildren = Array.from(targetElement.children || []);
-  
+
   for (let i = 0; i < Math.min(sourceChildren.length, targetChildren.length); i++) {
     inlineAllStyles(sourceChildren[i], targetChildren[i]);
   }

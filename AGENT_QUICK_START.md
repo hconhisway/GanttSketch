@@ -3,6 +3,7 @@
 ## What's New
 
 The Gantt chart now features intelligent agents that:
+
 1. **Auto-detect data schema** - Works with any field naming convention
 2. **Generate initial config** - Smart defaults based on your data
 3. **Understand context** - Config changes reference actual field names from your data
@@ -12,12 +13,14 @@ The Gantt chart now features intelligent agents that:
 ### 1. Load Your Data
 
 When you load a trace file, the system automatically:
+
 - Analyzes your data fields (using LLM)
 - Detects semantic meanings (e.g., "Location" → process ID)
 - Generates an appropriate initial configuration
 - Shows a message: "✨ Data schema auto-detected with X fields"
 
 Example fields it recognizes:
+
 - **Process ID**: `pid`, `processId`, `Location`, `rank`, `device`, `gpu_id`
 - **Thread ID**: `tid`, `threadId`, `thread`
 - **Event name**: `name`, `Primitive`, `op_name`, `kernel`, `function`
@@ -29,34 +32,43 @@ Example fields it recognizes:
 Simply describe what you want in natural language:
 
 **Color by category:**
+
 ```
 "Color events by category"
 ```
+
 → Generates: `color.keyRule` using your actual category field name
 
 **Sort processes:**
+
 ```
 "Sort processes by fork tree"
 ```
+
 → Generates: `yAxis.processOrderRule` with forkTree transform
 
 **Customize tooltip:**
+
 ```
 "Show only name and duration in tooltip"
 ```
+
 → Generates: `tooltip.event.fields` with selected fields
 
 **Adjust layout:**
+
 ```
 "Make lanes taller"
 or
 "Set lane height to 24 pixels"
 ```
+
 → Generates: `layout.laneHeight` update
 
 ### 3. Use Config Buttons (Existing Feature)
 
 The config panel at the top still works exactly as before:
+
 - Click any config button to open the editor
 - Edit JSON directly
 - Save to apply changes
@@ -66,6 +78,7 @@ The config panel at the top still works exactly as before:
 ### 4. Review Auto-Applied Config
 
 After data loads with auto-detection:
+
 1. Check the console for detected schema
 2. Look at the system message in chat
 3. Use config buttons to inspect what was configured
@@ -76,6 +89,7 @@ After data loads with auto-detection:
 ### Example 1: GPU Trace
 
 **Your data:**
+
 ```json
 {
   "gpu_id": 0,
@@ -86,18 +100,21 @@ After data loads with auto-detection:
 ```
 
 **Auto-detected:**
+
 - `gpu_id` → process_id
 - `kernel` → name
 - `start_time` → start_time
 - `duration` → duration
 
 **Auto-generated config:**
+
 - Color by kernel name
 - Tooltip shows: kernel, duration, gpu_id
 
 ### Example 2: Nested Format
 
 **Your data:**
+
 ```json
 {
   "Raw": {
@@ -110,18 +127,21 @@ After data loads with auto-detection:
 ```
 
 **Auto-detected:**
+
 - `Raw.pid` → process_id
 - `Raw.name` → name
 - `enter.Timestamp` → start_time
 - `leave.Timestamp` → end_time
 
 **Auto-generated config:**
+
 - Color by name
 - Tooltip shows detected fields
 
 ### Example 3: Custom Format
 
 **Your data:**
+
 ```json
 {
   "Location": "rank_0",
@@ -133,6 +153,7 @@ After data loads with auto-detection:
 ```
 
 **Auto-detected:**
+
 - `Location` → process_id
 - `Primitive` → name
 - `Category` → category
@@ -140,6 +161,7 @@ After data loads with auto-detection:
 - `dur` → duration
 
 **Auto-generated config:**
+
 - Color by Category
 - Tooltip shows all fields
 
@@ -154,6 +176,7 @@ After data loads with auto-detection:
 ### If Schema Detection Fails
 
 Don't worry! The app continues to work:
+
 - Data loads normally with default config
 - You can still use chat to modify config
 - Manual config editing works as before
@@ -187,6 +210,7 @@ Don't worry! The app continues to work:
 ## What's Preserved
 
 All existing functionality remains intact:
+
 - ✅ Manual file upload
 - ✅ Zoom and pan
 - ✅ Drawing mode
@@ -198,20 +222,24 @@ All existing functionality remains intact:
 ## Troubleshooting
 
 **Schema detection not running?**
+
 - Check console for errors
 - Verify LLM API key is configured
 - Check network connection
 
 **Initial config not ideal?**
+
 - No problem! Use chat or manual edit to change it
 - Schema detection is a starting point, not final
 
 **Config changes not applying?**
+
 - Check for system error messages in chat
 - Verify LLM response in console
 - Try manual edit as fallback
 
 **Wrong field detected?**
+
 - Schema detection is best-effort
 - Use config buttons to manually fix any issues
 - Report common misdetections for prompt improvements
@@ -221,6 +249,7 @@ All existing functionality remains intact:
 ### Access Detected Schema
 
 In browser console:
+
 ```javascript
 // View detected schema
 console.log(window.appState?.dataSchema);
@@ -229,6 +258,7 @@ console.log(window.appState?.dataSchema);
 ### Manual Schema Override
 
 If needed, you can always use manual config editing to reference any field:
+
 ```json
 {
   "color": {

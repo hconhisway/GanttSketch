@@ -170,7 +170,7 @@ export function convertLLMConfigToTracksConfig(llmConfig, data) {
             const n = filterDef.params?.n || 5;
             const trackStats = {};
 
-            data.forEach(d => {
+            data.forEach((d) => {
               if (!trackStats[d.track]) {
                 trackStats[d.track] = { sum: 0, count: 0 };
               }
@@ -178,13 +178,13 @@ export function convertLLMConfigToTracksConfig(llmConfig, data) {
               trackStats[d.track].count++;
             });
 
-            const trackAverages = Object.keys(trackStats).map(track => ({
+            const trackAverages = Object.keys(trackStats).map((track) => ({
               track,
               avg: trackStats[track].sum / trackStats[track].count
             }));
 
             trackAverages.sort((a, b) => b.avg - a.avg);
-            result.trackList = trackAverages.slice(0, n).map(t => t.track);
+            result.trackList = trackAverages.slice(0, n).map((t) => t.track);
           } else if (PREDEFINED_FILTER_FUNCTIONS[funcName]) {
             result.filter = PREDEFINED_FILTER_FUNCTIONS[funcName];
           }
@@ -212,12 +212,14 @@ export function convertLLMConfigToTracksConfig(llmConfig, data) {
 export function getEnhancedSystemPrompt(chartContext) {
   const basePrompt = TRACKS_CONFIG_SYSTEM_PROMPT;
 
-  const contextInfo = chartContext.activeConfigItem ? `
+  const contextInfo = chartContext.activeConfigItem
+    ? `
 
 ## Current Chart Context
 
 - Current config: ${chartContext.configSummary || 'unknown'}
-` : `
+`
+    : `
 
 ## Current Chart Context
 
@@ -229,7 +231,8 @@ export function getEnhancedSystemPrompt(chartContext) {
 `;
 
   const activeItem = chartContext.activeConfigItem;
-  const activeInfo = activeItem ? `
+  const activeInfo = activeItem
+    ? `
 
 ## Active Config Target (STRICT)
 
@@ -243,8 +246,8 @@ You MUST ONLY update this path:
 If the user asks for changes outside this path, ask them to select the correct config button.
 Only emit a patch that updates the active path.
 Do not output configure_tracks or widget actions while a target is active.
-` : '';
+`
+    : '';
 
   return basePrompt + contextInfo + activeInfo;
 }
-

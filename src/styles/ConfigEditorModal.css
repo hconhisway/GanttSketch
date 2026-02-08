@@ -1,0 +1,118 @@
+.config-editor {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.config-editor-modal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 16px;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.config-editor-window {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 360px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.25);
+  pointer-events: auto;
+}
+
+.config-editor-window.highlight {
+  border: 1px solid #f59e0b;
+  box-shadow:
+    0 0 0 3px rgba(245, 158, 11, 0.25),
+    0 12px 40px rgba(15, 23, 42, 0.25);
+}
+
+.config-editor-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.config-editor-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.config-editor-path {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.config-editor-description {
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.config-editor-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 110px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  padding: 8px;
+  font-size: 12px;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+  background: #ffffff;
+}
+
+.config-editor-textarea.highlight {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+.config-editor-example {
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: #eef2ff;
+  font-size: 11px;
+  color: #3730a3;
+  overflow-x: auto;
+}
+
+.config-editor-error {
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+.config-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.config-editor-save,
+.config-editor-cancel {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.config-editor-save {
+  background: #4f46e5;
+  color: #ffffff;
+}
+
+.config-editor-cancel {
+  background: #e5e7eb;
+  color: #111827;
+}

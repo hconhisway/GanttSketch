@@ -71,6 +71,7 @@ This document provides a comprehensive technical overview of the LLM-powered tra
 **Purpose:** Teaches the LLM how to understand user intent and generate track configurations.
 
 **Key Sections:**
+
 - **Capabilities**: What the LLM can understand (visual annotations, natural language, intent)
 - **Output Format**: Exact JSON schema for configurations
 - **Configuration Schema**: Detailed explanation of all configuration options
@@ -81,6 +82,7 @@ This document provides a comprehensive technical overview of the LLM-powered tra
 **Size:** ~200 lines
 
 **Context Enhancement:**
+
 ```javascript
 function getEnhancedSystemPrompt(chartContext) {
   // Adds current chart data:
@@ -98,15 +100,17 @@ function getEnhancedSystemPrompt(chartContext) {
 **Purpose:** Extracts JSON configuration from LLM's text response.
 
 **Algorithm:**
-```javascript
+
+````javascript
 1. Search for ```json code blocks
 2. Extract JSON content
 3. Parse JSON
 4. Validate action === 'configure_tracks'
 5. Return parsed config or null
-```
+````
 
 **Error Handling:**
+
 - Try-catch for JSON parsing errors
 - Validation of required fields
 - Returns null if not a configuration response
@@ -120,6 +124,7 @@ function getEnhancedSystemPrompt(chartContext) {
 **Conversion Logic:**
 
 #### Filter Types
+
 ```javascript
 // Range filter
 { type: "range", value: { min, max } }
@@ -139,6 +144,7 @@ function getEnhancedSystemPrompt(chartContext) {
 ```
 
 #### Special Cases
+
 - **top_n_utilization**: Calculates utilization statistics and generates track list
 - **numeric_only, even_only, odd_only**: Uses predefined functions
 
@@ -147,6 +153,7 @@ function getEnhancedSystemPrompt(chartContext) {
 **Integration Points:**
 
 #### A. Enhanced Message Handling
+
 ```javascript
 handleSendMessage() {
   // 1. Prepare chart context
@@ -156,10 +163,10 @@ handleSendMessage() {
     timeRange: `${start} to ${end}`,
     dataPointCount: data.length
   };
-  
+
   // 2. Get enhanced system prompt
   const systemPrompt = getEnhancedSystemPrompt(chartContext);
-  
+
   // 3. Send to LLM with context
   // 4. Stream response
   // 5. Parse for configuration
@@ -169,18 +176,22 @@ handleSendMessage() {
 ```
 
 #### B. Automatic Application
+
 ```javascript
 // After LLM response completes:
 const trackConfig = parseTrackConfigFromResponse(response);
 if (trackConfig) {
   const internalConfig = convertLLMConfigToTracksConfig(trackConfig, data);
   setTracksConfig(internalConfig);
-  
+
   // Show confirmation message
-  setMessages(prev => [...prev, {
-    role: 'system',
-    content: `✅ Track configuration applied: ${description}`
-  }]);
+  setMessages((prev) => [
+    ...prev,
+    {
+      role: 'system',
+      content: `✅ Track configuration applied: ${description}`
+    }
+  ]);
 }
 ```
 
@@ -238,6 +249,7 @@ if (trackConfig) {
 ### 1. Natural Language Understanding
 
 The LLM can interpret various phrasings:
+
 - "Show tracks 5 to 10"
 - "Display tracks between 5 and 10"
 - "Filter to tracks 5-10"
@@ -248,6 +260,7 @@ All result in the same configuration.
 ### 2. Intent Detection
 
 The system recognizes different intent types:
+
 - **Filtering**: "Show only...", "Display tracks...", "Filter to..."
 - **Sorting**: "Sort...", "Order...", "Arrange..."
 - **Grouping**: "Group...", "Organize...", "Split into..."
@@ -256,6 +269,7 @@ The system recognizes different intent types:
 ### 3. Context Awareness
 
 The LLM receives:
+
 - Current track names (can reference specific tracks)
 - Time range (can filter by time-related criteria)
 - Total tracks (can understand "half", "first 10", etc.)
@@ -264,6 +278,7 @@ The LLM receives:
 ### 4. Vision Support (Optional)
 
 With vision-capable models:
+
 - User draws on chart
 - Captures annotated image
 - Sends to LLM with text
@@ -273,16 +288,19 @@ With vision-capable models:
 ### 5. Error Handling
 
 #### Parser Level
+
 - Invalid JSON → Returns null, LLM response shown normally
 - Missing fields → Returns null, no configuration applied
 - Wrong action → Returns null, treated as regular response
 
 #### Converter Level
+
 - Unknown filter type → Logs error, applies default
 - Invalid track names → Filters to existing tracks only
 - Empty results → Chart shows "no tracks match" message
 
 #### Application Level
+
 - Try-catch around configuration application
 - Error messages shown in chat as system messages
 - Chart state preserved if error occurs
@@ -290,17 +308,20 @@ With vision-capable models:
 ## Performance Considerations
 
 ### Parsing Performance
+
 - Regex-based JSON extraction: O(n) where n = response length
 - JSON.parse: Native JavaScript, highly optimized
 - Typically < 1ms for normal responses
 
 ### Conversion Performance
+
 - Filter function creation: O(1)
 - Track list filtering: O(n) where n = unique tracks
 - Utilization calculation (for top_n): O(m) where m = data points
 - Typically < 10ms for most datasets
 
 ### Chart Update Performance
+
 - React state update triggers re-render
 - Plot.js efficiently handles data changes
 - Filtered data reduces rendering load
@@ -309,17 +330,20 @@ With vision-capable models:
 ## Security Considerations
 
 ### Input Validation
+
 - JSON parsing in try-catch prevents injection
 - Track names sanitized through Set operations
 - Filter functions are predefined or generated (not eval'd)
 
 ### LLM Output Validation
+
 - Strict schema validation
 - Type checking on all fields
 - Whitelist approach for filter types
 - No arbitrary code execution
 
 ### API Security
+
 - Uses existing LLM API configuration
 - No additional API keys required
 - All LLM communication via configured provider
@@ -332,7 +356,7 @@ With vision-capable models:
 1. **Basic Filtering**
    - Range filters (5-10, 0-20, etc.)
    - List filters (specific tracks)
-   - Pattern filters (CPU.*, GPU.*, etc.)
+   - Pattern filters (CPU._, GPU._, etc.)
    - Function filters (even, odd, numeric)
 
 2. **Sorting**
@@ -423,11 +447,13 @@ See CHANGELOG.md "Upcoming Features" section for planned improvements.
 ## Dependencies
 
 ### Required
+
 - React (existing)
-- Existing LLM API configuration (from `llmConfig.js`)
+- Existing LLM API configuration (from `llmConfig.ts`)
 - Existing tracks configuration system (from v1.2.0)
 
 ### Optional
+
 - Vision-capable LLM for sketch analysis
 - Drawing module for creating sketches
 
@@ -459,12 +485,14 @@ Documentation:
 ## Metrics
 
 ### Code Statistics
+
 - **New Lines**: ~350 (tracksConfigPrompt.js + App.js changes)
 - **Modified Lines**: ~50 (App.js modifications)
 - **Documentation**: ~1800 lines across 3 files
 - **Total Impact**: ~2200 lines
 
 ### Complexity
+
 - **Cyclomatic Complexity**: Low (mostly linear logic)
 - **Cognitive Complexity**: Medium (requires understanding LLM interaction)
 - **Maintenance Burden**: Low (well-documented, isolated module)
@@ -482,7 +510,7 @@ The LLM-powered track configuration system provides a natural, conversational in
 ✅ Comprehensive error handling  
 ✅ Zero additional dependencies  
 ✅ Extensive documentation  
-✅ Seamless integration with existing features  
+✅ Seamless integration with existing features
 
 ### Impact
 
@@ -497,4 +525,3 @@ The LLM-powered track configuration system provides a natural, conversational in
 **Version:** 1.3.0  
 **Date:** 2025-11-06  
 **Author:** GanttSketch Development Team
-

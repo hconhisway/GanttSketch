@@ -1,4 +1,11 @@
-import React, { useRef, useState, useImperativeHandle, forwardRef, useCallback, useEffect } from 'react';
+import React, {
+  useRef,
+  useState,
+  useImperativeHandle,
+  forwardRef,
+  useCallback,
+  useEffect
+} from 'react';
 import './GanttDrawingOverlay.css';
 import { exportDOMToCanvas } from './ExportHelper';
 import { GANTT_CONFIG } from './ganttConfig';
@@ -6,24 +13,23 @@ import { GANTT_CONFIG } from './ganttConfig';
 /**
  * Drawing controls component - displays inline with sliders
  */
-export const DrawingControls = forwardRef(function DrawingControls({ 
-  isActive, 
-  onToggle, 
-  onClear,
-  brushSize,
-  setBrushSize,
-  brushColor,
-  setBrushColor,
-  processSortMode,
-  onProcessSortModeChange,
-  showSort = true
-}, ref) {
+export const DrawingControls = forwardRef(function DrawingControls(
+  {
+    isActive,
+    onToggle,
+    onClear,
+    brushSize,
+    setBrushSize,
+    brushColor,
+    setBrushColor,
+    processSortMode,
+    onProcessSortModeChange,
+    showSort = true
+  },
+  ref
+) {
   const [showColorPicker, setShowColorPicker] = useState(false);
-  const colors = [
-    ...(GANTT_CONFIG.color?.palette || []),
-    '#111827',
-    '#FFFFFF'
-  ];
+  const colors = [...(GANTT_CONFIG.color?.palette || []), '#111827', '#FFFFFF'];
 
   return (
     <div className="drawing-controls-inline">
@@ -31,14 +37,14 @@ export const DrawingControls = forwardRef(function DrawingControls({
         <span className="section-icon">🎨</span>
         <span className="section-title">Drawing Tools</span>
       </div>
-      
+
       <div className="drawing-controls-grid">
         {/* Toggle Drawing Mode */}
         <div className="drawing-control-item">
           <button
             onClick={() => onToggle(!isActive)}
             className={`control-btn toggle-btn ${isActive ? 'active' : ''}`}
-            title={isActive ? "Exit drawing mode" : "Enter drawing mode"}
+            title={isActive ? 'Exit drawing mode' : 'Enter drawing mode'}
           >
             {isActive ? '✏️ Drawing' : '🖊️ Draw'}
           </button>
@@ -49,7 +55,10 @@ export const DrawingControls = forwardRef(function DrawingControls({
           <button
             onClick={() => setShowColorPicker(!showColorPicker)}
             className="control-btn color-btn"
-            style={{ backgroundColor: brushColor, color: brushColor === '#ffffff' ? '#000' : '#fff' }}
+            style={{
+              backgroundColor: brushColor,
+              color: brushColor === '#ffffff' ? '#000' : '#fff'
+            }}
             disabled={!isActive}
             title="Choose color"
           >
@@ -77,9 +86,7 @@ export const DrawingControls = forwardRef(function DrawingControls({
 
         {/* Brush Size */}
         <div className="drawing-control-item brush-size-inline">
-          <label className="brush-size-label">
-            Size: {brushSize}
-          </label>
+          <label className="brush-size-label">Size: {brushSize}</label>
           <input
             type="range"
             min="1"
@@ -125,12 +132,10 @@ export const DrawingControls = forwardRef(function DrawingControls({
 /**
  * Drawing canvas overlay - placed over the chart
  */
-export const GanttDrawingOverlay = forwardRef(function GanttDrawingOverlay({ 
-  isActive,
-  brushSize,
-  brushColor,
-  onPathsChange
-}, ref) {
+export const GanttDrawingOverlay = forwardRef(function GanttDrawingOverlay(
+  { isActive, brushSize, brushColor, onPathsChange },
+  ref
+) {
   const svgRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [paths, setPaths] = useState([]);
@@ -145,17 +150,17 @@ export const GanttDrawingOverlay = forwardRef(function GanttDrawingOverlay({
       // Find the chart SVG (the actual Observable Plot SVG)
       const chartContainer = document.querySelector('.chart-container');
       if (!chartContainer) return;
-      
+
       const chartDiv = chartContainer.querySelector('.chart');
       if (!chartDiv) return;
-      
+
       // Find the main chart SVG (largest SVG in the chart area)
       // Observable Plot used to wrap charts in <figure>, but our d3 gantt renders raw <svg>.
       const figure = chartDiv.querySelector('figure');
       const svgs = figure
         ? Array.from(figure.querySelectorAll('svg'))
         : Array.from(chartDiv.querySelectorAll('svg'));
-      
+
       let chartSVG = null;
       let maxArea = 0;
       for (const svg of svgs) {
@@ -166,13 +171,13 @@ export const GanttDrawingOverlay = forwardRef(function GanttDrawingOverlay({
           chartSVG = svg;
         }
       }
-      
+
       if (!chartSVG) return;
-      
+
       // Get chart SVG and container positions
       const svgRect = chartSVG.getBoundingClientRect();
       const containerRect = chartContainer.getBoundingClientRect();
-      
+
       // Calculate position relative to container
       const newStyle = {
         width: svgRect.width,
@@ -180,40 +185,44 @@ export const GanttDrawingOverlay = forwardRef(function GanttDrawingOverlay({
         left: svgRect.left - containerRect.left,
         top: svgRect.top - containerRect.top
       };
-      
+
       // Log only if position changed significantly (avoid spam)
       const prev = prevStyleRef.current;
-      const changed = Math.abs(newStyle.width - prev.width) > 1 ||
-                     Math.abs(newStyle.height - prev.height) > 1 ||
-                     Math.abs(newStyle.left - prev.left) > 1 ||
-                     Math.abs(newStyle.top - prev.top) > 1;
-      
+      const changed =
+        Math.abs(newStyle.width - prev.width) > 1 ||
+        Math.abs(newStyle.height - prev.height) > 1 ||
+        Math.abs(newStyle.left - prev.left) > 1 ||
+        Math.abs(newStyle.top - prev.top) > 1;
+
       if (changed) {
         console.log('📐 Overlay positioning:');
         console.log('  Size:', `${newStyle.width.toFixed(1)}x${newStyle.height.toFixed(1)}`);
         console.log('  Position:', `(${newStyle.left.toFixed(1)}, ${newStyle.top.toFixed(1)})`);
         console.log('  SVG screen pos:', `(${svgRect.left.toFixed(1)}, ${svgRect.top.toFixed(1)})`);
-        console.log('  Container screen pos:', `(${containerRect.left.toFixed(1)}, ${containerRect.top.toFixed(1)})`);
+        console.log(
+          '  Container screen pos:',
+          `(${containerRect.left.toFixed(1)}, ${containerRect.top.toFixed(1)})`
+        );
         prevStyleRef.current = newStyle;
       }
-      
+
       setOverlayStyle(newStyle);
     };
-    
+
     // Update on mount, when active state changes, or window resize
     updateOverlayPosition();
-    
+
     const resizeObserver = new ResizeObserver(updateOverlayPosition);
     const chartContainer = document.querySelector('.chart-container');
     if (chartContainer) {
       resizeObserver.observe(chartContainer);
     }
-    
+
     window.addEventListener('resize', updateOverlayPosition);
-    
+
     // Also update periodically in case chart updates
     const interval = setInterval(updateOverlayPosition, 500);
-    
+
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateOverlayPosition);
@@ -224,69 +233,87 @@ export const GanttDrawingOverlay = forwardRef(function GanttDrawingOverlay({
   // Get SVG coordinates from mouse event
   const getSVGCoordinates = useCallback((e) => {
     if (!svgRef.current) return null;
-    
+
     const svg = svgRef.current;
     const rect = svg.getBoundingClientRect();
-    
+
     // Calculate relative position within SVG
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    
+
     // Check if click is within bounds
     if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
       return null;
     }
-    
+
     return { x, y };
   }, []);
 
   // Start drawing
-  const startDrawing = useCallback((e) => {
-    if (!isActive) return;
-    
-    const coords = getSVGCoordinates(e);
-    if (!coords) return;
-    
-    setIsDrawing(true);
-    
-    const pathId = `path-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    const newPath = `M ${coords.x} ${coords.y}`;
-    
-    setCurrentPath(newPath);
-    setCurrentPathId(pathId);
-  }, [isActive, getSVGCoordinates]);
+  const startDrawing = useCallback(
+    (e) => {
+      if (!isActive) return;
+
+      const coords = getSVGCoordinates(e);
+      if (!coords) return;
+
+      setIsDrawing(true);
+
+      const pathId = `path-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+      const newPath = `M ${coords.x} ${coords.y}`;
+
+      setCurrentPath(newPath);
+      setCurrentPathId(pathId);
+    },
+    [isActive, getSVGCoordinates]
+  );
 
   // Continue drawing
-  const draw = useCallback((e) => {
-    if (!isDrawing || !isActive || !currentPathId) return;
+  const draw = useCallback(
+    (e) => {
+      if (!isDrawing || !isActive || !currentPathId) return;
 
-    const coords = getSVGCoordinates(e);
-    if (!coords) return;
-    
-    const newPath = currentPath + ` L ${coords.x} ${coords.y}`;
-    setCurrentPath(newPath);
-  }, [isDrawing, isActive, currentPathId, currentPath, getSVGCoordinates]);
+      const coords = getSVGCoordinates(e);
+      if (!coords) return;
+
+      const newPath = currentPath + ` L ${coords.x} ${coords.y}`;
+      setCurrentPath(newPath);
+    },
+    [isDrawing, isActive, currentPathId, currentPath, getSVGCoordinates]
+  );
 
   // Stop drawing
   const stopDrawing = useCallback(() => {
     if (!isActive || !isDrawing || !currentPath) return;
-    
+
     // Save the completed path
-    const newPaths = [...paths, {
-      id: currentPathId,
-      path: currentPath,
-      color: brushColor,
-      width: brushSize
-    }];
-    
+    const newPaths = [
+      ...paths,
+      {
+        id: currentPathId,
+        path: currentPath,
+        color: brushColor,
+        width: brushSize
+      }
+    ];
+
     setPaths(newPaths);
     if (onPathsChange) onPathsChange(newPaths);
-    
+
     // Reset drawing state
     setIsDrawing(false);
     setCurrentPath('');
     setCurrentPathId('');
-  }, [isActive, isDrawing, currentPath, currentPathId, brushColor, brushSize, paths, onPathsChange]);
+  }, [
+    isActive,
+    isDrawing,
+    currentPath,
+    currentPathId,
+    brushColor,
+    brushSize,
+    paths,
+    onPathsChange
+  ]);
 
   // Clear all drawings
   const clearCanvas = useCallback(() => {
@@ -301,7 +328,7 @@ export const GanttDrawingOverlay = forwardRef(function GanttDrawingOverlay({
   const exportAnnotatedImage = useCallback(async () => {
     try {
       console.log('Starting chart export with', paths.length, 'drawing paths...');
-      
+
       // Find the chart container
       const chartContainer = document.querySelector('.chart-container');
       if (!chartContainer) {
@@ -318,7 +345,7 @@ export const GanttDrawingOverlay = forwardRef(function GanttDrawingOverlay({
       // Get dimensions
       const rect = chartDiv.getBoundingClientRect();
       console.log('Chart dimensions:', rect.width, 'x', rect.height);
-      
+
       // Use DOM export method directly (more reliable for Observable Plot)
       console.log('Using DOM export method...');
       const allPaths = [...paths];
@@ -356,7 +383,7 @@ export const GanttDrawingOverlay = forwardRef(function GanttDrawingOverlay({
         width: `${overlayStyle.width}px`,
         height: `${overlayStyle.height}px`,
         left: `${overlayStyle.left}px`,
-        top: `${overlayStyle.top}px`,
+        top: `${overlayStyle.top}px`
       }}
       onMouseDown={startDrawing}
       onMouseMove={draw}
@@ -375,7 +402,7 @@ export const GanttDrawingOverlay = forwardRef(function GanttDrawingOverlay({
           strokeLinejoin="round"
         />
       ))}
-      
+
       {/* Render current drawing path */}
       {currentPath && (
         <path

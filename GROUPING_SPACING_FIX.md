@@ -7,6 +7,7 @@
 ## 变更前后对比
 
 ### Before (虚线分隔)
+
 ```
 Track 1  ■■■■
 Track 2  ■■■
@@ -18,6 +19,7 @@ Track 6  ■■■■
 ```
 
 ### After (真实间距)
+
 ```
 Track 1  ■■■■
 Track 2  ■■■
@@ -37,7 +39,7 @@ Track 6  ■■■■
 ```javascript
 sortedGroups.forEach((group, groupIndex) => {
   // ... 添加group tracks
-  
+
   // Add spacer between groups (except after the last group)
   if (groupIndex < sortedGroups.length - 1) {
     trackOrder.push(`__spacer_${groupIndex}__`);
@@ -46,6 +48,7 @@ sortedGroups.forEach((group, groupIndex) => {
 ```
 
 **占位符命名规则**：
+
 - 格式：`__spacer_{index}__`
 - 示例：`__spacer_0__`, `__spacer_1__`, `__spacer_ungrouped__`
 
@@ -56,7 +59,7 @@ sortedGroups.forEach((group, groupIndex) => {
 ```javascript
 y: {
   // ...
-  tickFormat: (d) => d.toString().startsWith('__spacer_') ? '' : d
+  tickFormat: (d) => (d.toString().startsWith('__spacer_') ? '' : d);
 }
 ```
 
@@ -84,19 +87,24 @@ y: {
 ```javascript
 // 示例：4 groups，每组2 tracks
 trackOrder = [
-  '1', '2',              // Group 1
-  '__spacer_0__',        // 间距
-  '3', '4',              // Group 2
-  '__spacer_1__',        // 间距
-  '5', '6',              // Group 3
-  '__spacer_2__',        // 间距
-  '7', '8'               // Group 4
-]
+  '1',
+  '2', // Group 1
+  '__spacer_0__', // 间距
+  '3',
+  '4', // Group 2
+  '__spacer_1__', // 间距
+  '5',
+  '6', // Group 3
+  '__spacer_2__', // 间距
+  '7',
+  '8' // Group 4
+];
 ```
 
 ### 视觉效果
 
 现在groups之间有：
+
 - ✅ 真实的垂直空白间距
 - ✅ 清晰的视觉分离
 - ✅ 更自然的外观（没有线条）
@@ -146,6 +154,7 @@ trackOrder.push(`__spacer_${groupIndex}_2__`);
 ## 测试
 
 验证改进：
+
 1. 选择"Grouped (Auto 2 Groups)"
 2. **预期效果**：
    - Groups之间有明显的空白间距
@@ -159,10 +168,3 @@ trackOrder.push(`__spacer_${groupIndex}_2__`);
 **Date:** 2025-11-06  
 **Improvement:** Replaced dashed separators with actual spacing  
 **Status:** Implemented ✅
-
-
-
-
-
-
-

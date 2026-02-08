@@ -7,33 +7,40 @@ The GanttSketch application now includes a powerful tracks configuration system 
 ## Features
 
 ### 1. **Sorting**
+
 Control the order in which tracks appear in your chart.
 
 #### Sort Modes:
+
 - **Ascending (Default)**: Sorts tracks from smallest to largest (numerically) or A-Z (alphabetically)
 - **Descending**: Sorts tracks from largest to smallest or Z-A
 - **Grouped**: Organizes tracks into custom groups
 - **Custom**: Use a custom sorting function
 
 ### 2. **Filtering**
+
 Control which tracks are displayed in the chart.
 
 #### Filter Options:
+
 - **Show All**: Display all tracks (default)
 - **Numeric Only**: Show only tracks that can be parsed as numbers
 - **First 5**: Display only the first 5 tracks (after sorting)
 - **Custom Filter**: Use a custom filter function
 
 ### 3. **Grouping**
+
 Organize tracks into logical groups with rich visual indicators.
 
 #### Visual Effects:
+
 - **Group Labels**: Bold, colored labels appear on the left side of the Y-axis
 - **Background Colors**: Alternating subtle backgrounds for each group region
 - **Separator Lines**: Dashed lines between groups for clear boundaries
 - **Increased Margin**: Extra left margin to accommodate group labels
 
 #### Example Grouping:
+
 - **Group A/B**: Automatically splits numeric tracks into two groups
 - **Custom Names**: Use meaningful names like "High Priority", "CPU Resources"
 - **Default Names**: "Group 1", "Group 2", "Group 3" when no context is provided
@@ -71,6 +78,7 @@ The `tracksConfig` state object supports the following properties:
 ### Examples
 
 #### Example 1: Custom Sorting
+
 Sort tracks in reverse alphabetical order:
 
 ```javascript
@@ -81,6 +89,7 @@ setTracksConfig({
 ```
 
 #### Example 2: Custom Filtering
+
 Show only even-numbered tracks:
 
 ```javascript
@@ -93,6 +102,7 @@ setTracksConfig({
 ```
 
 #### Example 3: Explicit Track List
+
 Display only specific tracks:
 
 ```javascript
@@ -102,6 +112,7 @@ setTracksConfig({
 ```
 
 #### Example 4: Advanced Grouping
+
 Create custom groups with specific tracks:
 
 ```javascript
@@ -128,6 +139,7 @@ setTracksConfig({
 ```
 
 #### Example 5: Dynamic Grouping by Value
+
 Group tracks based on utilization:
 
 ```javascript
@@ -157,10 +169,12 @@ function processTracksConfig(data, config = {})
 ```
 
 **Parameters:**
+
 - `data`: Array of chart data objects
 - `config`: Configuration object (see above)
 
 **Returns:**
+
 ```javascript
 {
   processedData: [...],  // Filtered data
@@ -196,15 +210,18 @@ When using grouped mode, the chart automatically adds dashed horizontal lines be
 ## Troubleshooting
 
 ### Chart is Empty
+
 - Check if your filter is too restrictive
 - Verify that the tracks in your `trackList` or `groups` actually exist in the data
 - Use "Show All" to reset filters
 
 ### Sorting Not Working
+
 - Ensure `sortMode` is set correctly
 - For custom sorting, verify your `customSort` function returns a number
 
 ### Groups Not Showing
+
 - Set `sortMode` to `'grouped'`
 - Ensure `groups` array is properly formatted
 - Each group must have: `name`, `tracks` (array), and optionally `order` (number)
@@ -216,6 +233,7 @@ The tracks configuration works seamlessly with the existing API. The filtering a
 ## Future Enhancements
 
 Potential future additions:
+
 - Save/load track configurations
 - Preset configurations for common use cases
 - Interactive drag-and-drop track reordering
@@ -225,4 +243,3 @@ Potential future additions:
 ## Support
 
 For issues or questions, please refer to the main README.md or open an issue in the project repository.
-

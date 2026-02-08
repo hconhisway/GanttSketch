@@ -4,14 +4,18 @@ This sheet describes the widget agent contract for creating UI widgets and
 updating widget layout/style.
 
 ## Trigger
+
 - The widget agent is used when the user message contains the keyword "widget".
 
 ## Widget Definition
+
 Each widget has two parts:
-1) HTML markup that defines the UI (no `<script>` tags).
-2) JavaScript callback(s) that listen for UI changes and update the visualization.
+
+1. HTML markup that defines the UI (no `<script>` tags).
+2. JavaScript callback(s) that listen for UI changes and update the visualization.
 
 ### Widget JSON Shape
+
 ```json
 {
   "action": "create_widget",
@@ -32,6 +36,7 @@ Each widget has two parts:
 ```
 
 ### Update Existing Widget
+
 ```json
 {
   "action": "update_widget",
@@ -46,6 +51,7 @@ Each widget has two parts:
 ```
 
 ### Listener Handler Contract
+
 - handler is JavaScript source (function body) executed as: `handler(payload, api, widget)`.
 - payload has: `event`, `target`, `value`, `widgetRoot`.
 - api exposes:
@@ -57,6 +63,7 @@ Each widget has two parts:
   - `setIsDrawingMode(boolean)`, `setBrushSize(number)`, `setBrushColor(color)`
 
 ## Widget Layout & Style (Config Sheet)
+
 These layout/style settings can be updated by the agent using
 `action: "update_widget_config"`.
 
@@ -97,6 +104,7 @@ These layout/style settings can be updated by the agent using
 ```
 
 ## Example: Sort Widget (Current Behavior)
+
 ```json
 {
   "action": "create_widget",

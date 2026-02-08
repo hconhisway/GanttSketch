@@ -1,4 +1,5 @@
 import ganttConfigSpec from '../GANTT_CONFIG_SPEC.json';
+import { ConfigSpec } from '../types/ganttConfig';
 
 /**
  * Config Index - Semantic metadata for all config items
@@ -6,45 +7,50 @@ import ganttConfigSpec from '../GANTT_CONFIG_SPEC.json';
  */
 
 // Extract keywords from path, description, and schema
-function extractKeywords(entry) {
-  const words = new Set();
-  
+function extractKeywords(entry: any) {
+  const words = new Set<string>();
+
   // From path: "yAxis.processOrderRule" -> ["yaxis", "process", "order", "rule"]
-  entry.path.split('.').forEach(segment => {
+  entry.path.split('.').forEach((segment: string) => {
     // Split camelCase
     const parts = segment.split(/(?=[A-Z])/);
-    parts.forEach(w => {
+    parts.forEach((w) => {
       if (w) words.add(w.toLowerCase());
     });
   });
-  
+
   // From description
   if (entry.description) {
-    entry.description.split(/\W+/).forEach(w => {
+    entry.description.split(/\W+/).forEach((w: string) => {
       if (w.length > 2) words.add(w.toLowerCase());
     });
   }
-  
+
   // From ID
   if (entry.id) {
-    entry.id.split(/[._-]/).forEach(w => {
+    entry.id.split(/[._-]/).forEach((w: string) => {
       if (w.length > 2) words.add(w.toLowerCase());
     });
   }
-  
+
   return Array.from(words);
 }
 
 // Infer related concepts based on config type
-function inferRelatedConcepts(entry) {
-  const concepts = [];
+function inferRelatedConcepts(entry: any) {
+  const concepts: string[] = [];
   const path = entry.path.toLowerCase();
   const desc = (entry.description || '').toLowerCase();
-  
+
   if (path.includes('color') || desc.includes('color')) {
     concepts.push('coloring', 'palette', 'hue', 'tint', 'shade', 'colorize', 'colorscheme');
   }
-  if (path.includes('order') || path.includes('sort') || desc.includes('order') || desc.includes('sort')) {
+  if (
+    path.includes('order') ||
+    path.includes('sort') ||
+    desc.includes('order') ||
+    desc.includes('sort')
+  ) {
     concepts.push('sorting', 'arrangement', 'sequence', 'organize', 'arrange');
   }
   if (path.includes('label') || desc.includes('label')) {
@@ -74,15 +80,15 @@ function inferRelatedConcepts(entry) {
   if (path.includes('margin') || path.includes('padding') || path.includes('gap')) {
     concepts.push('spacing', 'whitespace');
   }
-  
+
   return concepts;
 }
 
 // Common operations for each config type
-function inferCommonOperations(entry) {
-  const ops = [];
+function inferCommonOperations(entry: any) {
+  const ops: string[] = [];
   const schemaType = entry.schema?.type;
-  
+
   if (entry.kind === 'rule') {
     if (schemaType === 'transform' || entry.schema?.names) {
       ops.push('sort by', 'order by', 'group by', 'arrange', 'organize');
@@ -91,7 +97,7 @@ function inferCommonOperations(entry) {
       ops.push('set to', 'use', 'display', 'show', 'calculate', 'derive');
     }
   }
-  
+
   if (entry.kind === 'value') {
     if (schemaType === 'number') {
       ops.push('increase', 'decrease', 'set', 'change', 'adjust');
@@ -109,23 +115,23 @@ function inferCommonOperations(entry) {
       ops.push('set', 'change', 'update');
     }
   }
-  
+
   return ops;
 }
 
 // Build complete index from spec
-export function buildConfigIndex(spec) {
-  const index = {};
-  
+export function buildConfigIndex(spec: ConfigSpec) {
+  const index: Record<string, any> = {};
+
   if (!spec || !spec.sections) {
     console.warn('Invalid config spec provided to buildConfigIndex');
     return index;
   }
-  
+
   for (const section of spec.sections) {
     for (const entry of section.entries || []) {
       if (!entry.path) continue;
-      
+
       index[entry.path] = {
         id: entry.id || entry.path,
         path: entry.path,
@@ -135,7 +141,7 @@ export function buildConfigIndex(spec) {
         schema: entry.schema,
         default: entry.default,
         description: entry.description || '',
-        
+
         // Semantic metadata for LLM matching
         keywords: extractKeywords(entry),
         relatedConcepts: inferRelatedConcepts(entry),
@@ -143,68 +149,69 @@ export function buildConfigIndex(spec) {
       };
     }
   }
-  
+
   return index;
 }
 
 // Export the complete index
-export const CONFIG_INDEX = buildConfigIndex(ganttConfigSpec);
+export const CONFIG_INDEX = buildConfigIndex(ganttConfigSpec as unknown as ConfigSpec);
 
 // Helper: Find best matching config items for a query
-export function findMatchingConfigs(query, topK = 5) {
+export function findMatchingConfigs(query: string, topK = 5) {
   const queryLower = query.toLowerCase();
-  const scores = [];
-  
+  const scores: Array<{ path: string; config: any; score: number }> = [];
+
   for (const [path, config] of Object.entries(CONFIG_INDEX)) {
     let score = 0;
-    
+
     // Exact path match (highest priority)
     if (queryLower.includes(path.toLowerCase())) {
       score += 10;
     }
-    
+
     // Keyword match
     for (const kw of config.keywords) {
       if (queryLower.includes(kw)) {
         score += 2;
       }
     }
-    
+
     // Related concept match
     for (const concept of config.relatedConcepts) {
       if (queryLower.includes(concept)) {
         score += 1.5;
       }
     }
-    
+
     // Operation match
     for (const op of config.commonOperations) {
       if (queryLower.includes(op)) {
         score += 1;
       }
     }
-    
+
     // Description match
-    if (config.description && queryLower.split(/\s+/).some(word => 
-      word.length > 3 && config.description.toLowerCase().includes(word)
-    )) {
+    if (
+      config.description &&
+      queryLower
+        .split(/\s+/)
+        .some((word: string) => word.length > 3 && config.description.toLowerCase().includes(word))
+    ) {
       score += 0.5;
     }
-    
+
     if (score > 0) {
       scores.push({ path, config, score });
     }
   }
-  
-  return scores
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK);
+
+  return scores.sort((a, b) => b.score - a.score).slice(0, topK);
 }
 
 // Format index for LLM prompt (compact format)
 export function formatConfigIndexForPrompt() {
-  const sections = {};
-  
+  const sections: Record<string, any> = {};
+
   for (const [path, config] of Object.entries(CONFIG_INDEX)) {
     if (!sections[config.section]) {
       sections[config.section] = {
@@ -219,33 +226,31 @@ export function formatConfigIndexForPrompt() {
       keywords: config.keywords.slice(0, 5).join(', ')
     });
   }
-  
+
   return Object.entries(sections)
     .map(([section, data]) => {
-      const header = data.description 
-        ? `### ${section} - ${data.description}`
-        : `### ${section}`;
-      const itemsStr = data.items.map(i => 
-        `  - ${i.path} (${i.kind}): ${i.description || 'No description'}`
-      ).join('\n');
+      const header = data.description ? `### ${section} - ${data.description}` : `### ${section}`;
+      const itemsStr = data.items
+        .map((i: any) => `  - ${i.path} (${i.kind}): ${i.description || 'No description'}`)
+        .join('\n');
       return `${header}\n${itemsStr}`;
     })
     .join('\n\n');
 }
 
 // Get detailed info for a specific config path
-export function getConfigInfo(path) {
-  return CONFIG_INDEX[path] || null;
+export function getConfigInfo(path: string) {
+  return (CONFIG_INDEX as any)[path] || null;
 }
 
 // Get all config paths in a section
-export function getConfigPathsBySection(sectionId) {
+export function getConfigPathsBySection(sectionId: string) {
   return Object.entries(CONFIG_INDEX)
-    .filter(([_, config]) => config.section === sectionId)
+    .filter(([_, config]) => (config as any).section === sectionId)
     .map(([path]) => path);
 }
 
 // Get config item by ID
-export function getConfigById(id) {
-  return Object.values(CONFIG_INDEX).find(config => config.id === id) || null;
+export function getConfigById(id: string) {
+  return Object.values(CONFIG_INDEX).find((config: any) => config.id === id) || null;
 }

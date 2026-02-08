@@ -3,13 +3,16 @@
 ## Problem
 
 After selecting "Grouped" mode, the visual effects were not appearing:
+
 - ❌ No separator lines between groups
 - ❌ No increased spacing between tracks in different groups
 
 ## Root Causes
 
 ### 1. Separator Line Issue
+
 The original code used `Plot.ruleY` with track **indices** instead of track **values**:
+
 ```javascript
 // WRONG: Returns index
 const lastTrackIndex = trackOrder.indexOf(g.tracks[g.tracks.length - 1]);
@@ -19,6 +22,7 @@ return lastTrackIndex; // This is an index number, not a track value!
 Observable Plot's `ruleY` needs actual Y-axis values (track names), not indices.
 
 ### 2. Insufficient Track Spacing
+
 The Y-axis padding was the same for both grouped and non-grouped modes (0.1), making group separation less obvious.
 
 ## Solutions Implemented
@@ -34,18 +38,19 @@ Plot.line(
     { time: new Date(maxTime), track: currentLastTrack, type: 'separator' }
   ],
   {
-    x: "time",
-    y: "track",
-    stroke: "#666",
+    x: 'time',
+    y: 'track',
+    stroke: '#666',
     strokeWidth: 3,
-    strokeDasharray: "8,4",
+    strokeDasharray: '8,4',
     strokeOpacity: 1,
-    curve: "linear"
+    curve: 'linear'
   }
-)
+);
 ```
 
 **Key improvements:**
+
 - Uses actual track **values** (strings/numbers) instead of indices
 - Spans the full width of the chart (minTime to maxTime)
 - Enhanced visibility: 3px width, 8-4 dash pattern, solid opacity
@@ -80,6 +85,7 @@ Check browser console to verify separator positions.
 ## Visual Result
 
 ### Before (Broken)
+
 ```
 Track 0 ■■■■
 Track 1 ■■■
@@ -90,6 +96,7 @@ Track 5 ■■■■
 ```
 
 ### After (Fixed)
+
 ```
         Group 1 ┐
                 │
@@ -148,8 +155,8 @@ To verify the fix:
 ### Time Range Calculation
 
 ```javascript
-const allTimes = processedData.map(d => d.timeStart.getTime());
-const allTimesEnd = processedData.map(d => d.timeEnd.getTime());
+const allTimes = processedData.map((d) => d.timeStart.getTime());
+const allTimesEnd = processedData.map((d) => d.timeEnd.getTime());
 const minTime = Math.min(...allTimes);
 const maxTime = Math.max(...allTimesEnd);
 ```
@@ -159,6 +166,7 @@ Ensures separators span the entire chart width.
 ### Y-Axis Padding Effect
 
 Observable Plot's padding adds space around bands in categorical axes:
+
 - `padding: 0.1` → 10% of band height as spacing
 - `padding: 0.2` → 20% of band height as spacing (2x more space)
 
@@ -194,10 +202,3 @@ Observable Plot's padding adds space around bands in categorical axes:
 **Date:** 2025-11-06  
 **Issue:** Grouping visual effects not appearing  
 **Status:** Fixed ✅
-
-
-
-
-
-
-

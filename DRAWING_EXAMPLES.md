@@ -11,6 +11,7 @@ This document provides practical examples of how to use the drawing module effec
 **Scenario**: You notice unusual activity in Track 3 between timestamps 1000-1500 and want to highlight it.
 
 **Steps**:
+
 1. Click "🖊️ Draw" to enter drawing mode
 2. Click 🎨 and select **Red** (#ff0000)
 3. Set brush size to **8** for visibility
@@ -30,6 +31,7 @@ This document provides practical examples of how to use the drawing module effec
 **Scenario**: You want to compare activity patterns between two different time ranges.
 
 **Steps**:
+
 1. Enter drawing mode
 2. Select **Blue** (#0000ff)
 3. Set brush size to **5**
@@ -51,6 +53,7 @@ This document provides practical examples of how to use the drawing module effec
 **Scenario**: You need to mark important milestones or deadlines on the chart.
 
 **Steps**:
+
 1. Enter drawing mode
 2. Select **Magenta** (#ff00ff)
 3. Set brush size to **10** (bold)
@@ -71,6 +74,7 @@ This document provides practical examples of how to use the drawing module effec
 **Scenario**: Preparing a slide for a stakeholder presentation.
 
 **Steps**:
+
 1. Adjust chart view to show relevant time range
 2. Enter drawing mode
 3. Select **Orange** (#ffa500) for key findings
@@ -93,6 +97,7 @@ This document provides practical examples of how to use the drawing module effec
 **Scenario**: Creating training materials to explain how to read the chart.
 
 **Steps**:
+
 1. Enter drawing mode
 2. Select **Blue** (#0000ff)
 3. Set brush size to **4**
@@ -118,6 +123,7 @@ This document provides practical examples of how to use the drawing module effec
 **Scenario**: During a team video call, marking areas that need discussion.
 
 **Steps**:
+
 1. Share screen with GanttSketch open
 2. Enter drawing mode during discussion
 3. As issues are mentioned:
@@ -140,6 +146,7 @@ This document provides practical examples of how to use the drawing module effec
 **Scenario**: Identifying and marking trends in utilization data.
 
 **Steps**:
+
 1. Observe chart for patterns
 2. Enter drawing mode
 3. Select **Blue** (#0000ff)
@@ -162,6 +169,7 @@ This document provides practical examples of how to use the drawing module effec
 **Scenario**: Comparing performance across multiple tracks.
 
 **Steps**:
+
 1. Enter drawing mode
 2. For each track of interest:
    - Choose a **unique color**
@@ -182,22 +190,26 @@ This document provides practical examples of how to use the drawing module effec
 ### Basic Shapes
 
 **Circle/Oval**:
+
 - Start at top
 - Draw clockwise
 - Connect back to start
 - Use larger brush (8-12) for visibility
 
 **Rectangle/Box**:
+
 - Draw four sides
 - Keep corners tight
 - Use medium brush (5-7)
 
 **Arrow**:
+
 - Draw shaft (straight line)
 - Add V-shaped head
 - Use varied brush sizes
 
 **Underline**:
+
 - Draw straight horizontal line
 - Use thin brush (2-4)
 - Place directly under item
@@ -205,18 +217,21 @@ This document provides practical examples of how to use the drawing module effec
 ### Color Usage Patterns
 
 **Status Indicators**:
+
 - 🔴 Red: Problems, errors, critical
 - 🟢 Green: Good, complete, approved
 - 🟡 Yellow: Warning, pending, review needed
 - 🔵 Blue: Information, notes, neutral
 
 **Category Coding**:
+
 - 🟠 Orange: Category A
 - 🟣 Purple: Category B
 - 🔵 Cyan: Category C
 - 🟣 Magenta: Category D
 
 **Emphasis Levels**:
+
 - ⚫ Black: Primary annotation
 - 🔵 Blue: Secondary detail
 - White (on dark): Corrections
@@ -224,24 +239,28 @@ This document provides practical examples of how to use the drawing module effec
 ### Brush Size Guidelines
 
 **Fine Detail (1-3px)**:
+
 - Small annotations
 - Precise markings
 - Detailed notes
 - Fine arrows
 
 **Standard (4-7px)**:
+
 - General annotations
 - Normal circles
 - Standard lines
 - Readable marks
 
 **Bold Emphasis (8-12px)**:
+
 - Major highlights
 - Important markers
 - Attention grabbers
 - Headers
 
 **Very Bold (13-20px)**:
+
 - Backgrounds
 - Large shapes
 - Cover-ups
@@ -312,12 +331,14 @@ This document provides practical examples of how to use the drawing module effec
 ### Software Development
 
 **Sprint Planning**:
+
 - Mark sprint boundaries with vertical lines
 - Circle blocked tasks in red
 - Highlight completed features in green
 - Export for sprint review
 
 **Bug Triage**:
+
 - Circle bug occurrence times
 - Draw connections between related bugs
 - Color-code by severity
@@ -326,12 +347,14 @@ This document provides practical examples of how to use the drawing module effec
 ### Business Analytics
 
 **Sales Performance**:
+
 - Highlight peak sales periods
 - Mark promotion timeframes
 - Compare year-over-year with colors
 - Export for management review
 
 **Resource Planning**:
+
 - Circle overutilized periods
 - Mark available capacity in green
 - Draw trend lines
@@ -340,12 +363,14 @@ This document provides practical examples of how to use the drawing module effec
 ### Operations Management
 
 **Incident Response**:
+
 - Mark incident start/end times
 - Circle affected systems
 - Show recovery timeline
 - Document for post-mortem
 
 **Capacity Planning**:
+
 - Highlight bottlenecks
 - Mark expansion opportunities
 - Show growth trends
@@ -354,12 +379,14 @@ This document provides practical examples of how to use the drawing module effec
 ### Academic Research
 
 **Data Presentation**:
+
 - Annotate experimental phases
 - Mark significant events
 - Highlight correlations
 - Export for publications
 
 **Teaching Materials**:
+
 - Label chart components
 - Add instructional arrows
 - Create step-by-step guides
@@ -412,18 +439,23 @@ This document provides practical examples of how to use the drawing module effec
 ## Troubleshooting Common Drawing Issues
 
 ### Issue: Lines are jagged
+
 **Solution**: Draw more slowly, increase brush size slightly
 
 ### Issue: Can't draw where I want
+
 **Solution**: Ensure you're in drawing mode, check cursor is crosshair
 
 ### Issue: Colors don't show well
+
 **Solution**: Choose contrasting colors, avoid light colors on white background
 
 ### Issue: Export is too large/small
+
 **Solution**: Export captures chart as-is, adjust chart zoom before exporting
 
 ### Issue: Mistakes in drawing
+
 **Solution**: Use white color to "erase" over mistakes, or clear and redraw
 
 ---
@@ -441,18 +473,17 @@ This document provides practical examples of how to use the drawing module effec
 
 ## Quick Reference: Common Patterns
 
-| Task | Color | Brush Size | Technique |
-|------|-------|------------|-----------|
-| Highlight Problem | Red | 8-10 | Circle |
-| Mark Complete | Green | 6-8 | Checkmark |
-| Add Note | Blue | 4-6 | Arrow + line |
-| Show Trend | Black | 5-7 | Diagonal line |
-| Mark Deadline | Magenta | 10-12 | Vertical bar |
-| Connect Items | Purple | 4-5 | Curved line |
-| Emphasize Area | Yellow | 12-15 | Box/Background |
-| Label Component | Black | 2-3 | Small text simulation |
+| Task              | Color   | Brush Size | Technique             |
+| ----------------- | ------- | ---------- | --------------------- |
+| Highlight Problem | Red     | 8-10       | Circle                |
+| Mark Complete     | Green   | 6-8        | Checkmark             |
+| Add Note          | Blue    | 4-6        | Arrow + line          |
+| Show Trend        | Black   | 5-7        | Diagonal line         |
+| Mark Deadline     | Magenta | 10-12      | Vertical bar          |
+| Connect Items     | Purple  | 4-5        | Curved line           |
+| Emphasize Area    | Yellow  | 12-15      | Box/Background        |
+| Label Component   | Black   | 2-3        | Small text simulation |
 
 ---
 
 **Remember**: The best annotations are clear, purposeful, and enhance understanding without cluttering the visualization!
-

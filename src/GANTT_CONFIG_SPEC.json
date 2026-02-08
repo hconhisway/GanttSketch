@@ -9,12 +9,37 @@
       { "type": "predicate", "shape": { "type": "predicate", "when": { "op": "..." } } }
     ],
     "exprOps": [
-      "get", "var", "coalesce", "concat", "lower", "upper", "trim",
-      "==", "!=", ">", ">=", "<", "<=", "and", "or", "not", "case", "if",
-      "add", "sub", "mul", "div", "clamp", "len",
-      "regexTest", "regexCapture",
-      "hash", "paletteHash",
-      "formatTimeUs", "formatTimeUsFull", "formatDurationUs"
+      "get",
+      "var",
+      "coalesce",
+      "concat",
+      "lower",
+      "upper",
+      "trim",
+      "==",
+      "!=",
+      ">",
+      ">=",
+      "<",
+      "<=",
+      "and",
+      "or",
+      "not",
+      "case",
+      "if",
+      "add",
+      "sub",
+      "mul",
+      "div",
+      "clamp",
+      "len",
+      "regexTest",
+      "regexCapture",
+      "hash",
+      "paletteHash",
+      "formatTimeUs",
+      "formatTimeUsFull",
+      "formatDurationUs"
     ],
     "transformNames": [
       "forkTree",
@@ -94,8 +119,14 @@
           "schema": {
             "type": "object",
             "fields": [
-              "autoWidth", "baseWidth", "minWidth", "maxWidth",
-              "processIndent", "labelPadding", "processFont", "threadFont"
+              "autoWidth",
+              "baseWidth",
+              "minWidth",
+              "maxWidth",
+              "processIndent",
+              "labelPadding",
+              "processFont",
+              "threadFont"
             ]
           }
         },
@@ -118,7 +149,17 @@
           "kind": "rule",
           "schema": {
             "type": "transform",
-            "names": ["forkTree", "sortBy", "groupBy", "customList", "groupList", "filter", "pipeline", "pidAsc", "pidDesc"]
+            "names": [
+              "forkTree",
+              "sortBy",
+              "groupBy",
+              "customList",
+              "groupList",
+              "filter",
+              "pipeline",
+              "pidAsc",
+              "pidDesc"
+            ]
           }
         },
         {
@@ -268,7 +309,13 @@
             "fields": [
               { "label": "Name", "value": { "op": "get", "path": "event.name" } },
               { "label": "Phase", "value": { "op": "get", "path": "event.args.phase" } },
-              { "label": "Duration", "value": { "op": "formatDurationUs", "args": [{ "op": "var", "name": "durationUs" }] } }
+              {
+                "label": "Duration",
+                "value": {
+                  "op": "formatDurationUs",
+                  "args": [{ "op": "var", "name": "durationUs" }]
+                }
+              }
             ],
             "args": { "enabled": false }
           }

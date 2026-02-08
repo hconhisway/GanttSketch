@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 #### Enhanced Visual Grouping for Tracks ✨
+
 - **Group Labels on Y-Axis**: Bold, colored labels appear on the left side showing group names
 - **Alternating Background Colors**: Each group has a subtle background (alternating light gray/white)
 - **Enhanced Separator Lines**: Thicker, more visible dashed lines between groups
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 #### Modified Files
+
 - `src/App.js`:
   - Added `groupLabels` calculation for positioned group labels
   - Implemented alternating background rectangles for group regions
@@ -51,24 +53,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added VISUAL_GROUPING_GUIDE.md to project structure
 
 #### New Files
+
 - `VISUAL_GROUPING_GUIDE.md` - Comprehensive visual grouping documentation (300+ lines)
 
 ### Technical Details
 
 #### Visual Layering
+
 Marks are rendered in this order:
+
 1. **Background rectangles** (bottom) - Subtle alternating colors
 2. **Data rectangles** (middle) - Track utilization bars
 3. **Separator lines** (middle) - Dashed lines between groups
 4. **Group labels** (top) - Text labels on the left
 
 #### Layout Calculations
+
 - Group label position: Centered vertically within each group
 - Label offset: -85px from Y-axis (dx property)
 - Background spans: From first to last track in each group
 - Time extent: Full width of the chart data
 
 #### Styling
+
 - Label font: 12px bold
 - Label color: #667eea (purple)
 - Background opacity: 0.5
@@ -82,6 +89,7 @@ Marks are rendered in this order:
 ### Added
 
 #### LLM-Powered Track Configuration System ✨
+
 - **Natural language understanding**: LLM can interpret user requests like "show only tracks 5-10"
 - **Structured output generation**: LLM generates JSON configurations automatically
 - **Automatic application**: Configurations are parsed and applied to the chart instantly
@@ -94,6 +102,7 @@ Marks are rendered in this order:
 - **Context awareness**: LLM receives current chart context (tracks, time range, data points)
 
 #### New Files
+
 - `src/tracksConfigPrompt.js` - LLM track configuration system (250+ lines)
   - `TRACKS_CONFIG_SYSTEM_PROMPT` - Comprehensive LLM instruction prompt
   - `parseTrackConfigFromResponse()` - JSON extraction from LLM responses
@@ -106,6 +115,7 @@ Marks are rendered in this order:
 ### Changed
 
 #### Modified Files
+
 - `src/App.js`:
   - Imported tracks configuration prompt system
   - Enhanced `handleSendMessage()` to use context-aware system prompt
@@ -130,6 +140,7 @@ Marks are rendered in this order:
 ### Technical Details
 
 #### Architecture
+
 - **LLM Integration**: Seamless integration with existing chat system
 - **Format Conversion**: Bidirectional conversion between LLM and internal formats
 - **Error Handling**: Graceful handling of invalid configurations
@@ -138,18 +149,21 @@ Marks are rendered in this order:
 #### Supported Configurations
 
 **Filter Types:**
+
 - `range`: Numeric range filtering (e.g., tracks 5-10)
 - `list`: Explicit track list (e.g., ["track1", "track5"])
-- `pattern`: Regex pattern matching (e.g., "CPU.*")
+- `pattern`: Regex pattern matching (e.g., "CPU.\*")
 - `function`: Predefined functions (numeric_only, even_only, odd_only, top_n_utilization)
 
 **Sort Modes:**
+
 - `asc`: Ascending order
 - `desc`: Descending order
 - `grouped`: Custom groups with visual separators
 - `custom`: Custom sorting functions
 
 **Advanced Features:**
+
 - Top N by utilization
 - Multi-group organization
 - Pattern-based filtering
@@ -170,12 +184,14 @@ Marks are rendered in this order:
 **System:** Applies grouping with visual separators, confirms
 
 #### Performance
+
 - Lightweight JSON parsing
 - Efficient filter function execution
 - No performance impact on chart rendering
 - Real-time configuration application
 
 #### Browser Compatibility
+
 - Chrome/Edge 90+ ✅
 - Firefox 88+ ✅
 - Safari 14+ ✅
@@ -198,6 +214,7 @@ Marks are rendered in this order:
 ### Added
 
 #### Track Configuration System
+
 - **Flexible sorting** with multiple modes:
   - Ascending (default): alphabetical/numerical A-Z, 0-9
   - Descending: reverse order Z-A, 9-0
@@ -221,12 +238,14 @@ Marks are rendered in this order:
   - Full access to sorting, filtering, and grouping logic
 
 #### New Files
+
 - `TRACKS_CONFIG_GUIDE.md` - Complete guide for track configuration (400+ lines)
 - `TRACKS_CONFIG_EXAMPLES.md` - Advanced usage examples (500+ lines)
 
 ### Changed
 
 #### Modified Files
+
 - `src/App.js`:
   - Added `processTracksConfig()` function for track processing
   - Added `tracksConfig` state with full configuration options
@@ -252,6 +271,7 @@ Marks are rendered in this order:
 ### Technical Details
 
 #### Architecture
+
 - Non-destructive filtering (preserves original data)
 - Flexible configuration object pattern
 - Separation of data processing and rendering
@@ -260,29 +280,34 @@ Marks are rendered in this order:
 #### Features Detail
 
 **Sorting Modes:**
+
 - Ascending: Smart sorting (numeric-aware)
 - Descending: Reverse sorting (numeric-aware)
 - Custom: User-defined comparator function
 - Grouped: Multi-group organization with order control
 
 **Filtering Options:**
+
 - Function-based filtering: `(track) => boolean`
 - Explicit track lists: Array of track names
 - Chainable with sorting and grouping
 
 **Grouping System:**
+
 - Groups defined with: name, tracks array, order
 - Automatic handling of ungrouped tracks
 - Visual separators between groups
 - Preserves track order within groups
 
 #### Performance
+
 - Efficient Set operations for unique track extraction
 - Optimized sorting algorithms
 - Minimal re-renders with proper React dependency arrays
 - Scales well with large track counts (100+)
 
 #### Browser Compatibility
+
 - Chrome/Edge 90+ ✅
 - Firefox 88+ ✅
 - Safari 14+ ✅
@@ -304,6 +329,7 @@ Marks are rendered in this order:
 ### Added
 
 #### Drawing & Annotation Module
+
 - **Freehand drawing** capability directly on Gantt chart
 - **Drawing mode toggle** button to switch between normal and drawing mode
 - **Color picker** with 10 preset colors for annotations
@@ -316,6 +342,7 @@ Marks are rendered in this order:
 - **Visual feedback** with cursor changes and button states
 
 #### New Files
+
 - `src/GanttDrawingOverlay.js` - Main drawing component (356 lines)
 - `src/GanttDrawingOverlay.css` - Drawing module styles (197 lines)
 - `DRAWING_MODULE.md` - Comprehensive technical documentation (500+ lines)
@@ -327,6 +354,7 @@ Marks are rendered in this order:
 ### Changed
 
 #### Modified Files
+
 - `src/App.js`:
   - Added `GanttDrawingOverlay` import
   - Added `drawingOverlayRef` ref for component access
@@ -346,6 +374,7 @@ Marks are rendered in this order:
 ### Technical Details
 
 #### Architecture
+
 - SVG overlay system for non-destructive annotations
 - React hooks for state management (useState, useRef, useCallback)
 - Mouse event handling for drawing input
@@ -353,12 +382,14 @@ Marks are rendered in this order:
 - Blob API for file downloads
 
 #### Performance
+
 - Optimized mouse event handlers with useCallback
 - Efficient path storage and rendering
 - Memory cleanup after exports
 - Smooth 60 FPS drawing performance
 
 #### Browser Compatibility
+
 - Chrome/Edge 90+ ✅
 - Firefox 88+ ✅
 - Safari 14+ ✅
@@ -380,6 +411,7 @@ Marks are rendered in this order:
 ### Initial Release
 
 #### Features
+
 - Interactive Gantt chart visualization using Observable Plot
 - Real-time data fetching from local service
 - Three adjustable sliders:
@@ -396,6 +428,7 @@ Marks are rendered in this order:
   - Custom API endpoints
 
 #### Project Structure
+
 - React 18 application
 - Observable Plot for visualizations
 - D3.js for data manipulation
@@ -403,6 +436,7 @@ Marks are rendered in this order:
 - Environment variable configuration
 
 #### Documentation
+
 - README.md with setup instructions
 - LLM_SETUP.md for AI configuration
 - QUICK_START.md for getting started
@@ -423,6 +457,7 @@ Marks are rendered in this order:
 ## Upcoming Features (Planned)
 
 ### v1.3.0 (Future)
+
 - [ ] Save/load track configurations
 - [ ] Preset track configurations for common use cases
 - [ ] Interactive drag-and-drop track reordering
@@ -434,6 +469,7 @@ Marks are rendered in this order:
 - [ ] Shape tools (rectangles, circles, arrows)
 
 ### v1.4.0 (Future)
+
 - [ ] Track statistics dashboard
 - [ ] Heatmap visualization mode
 - [ ] Track comparison tools
@@ -443,6 +479,7 @@ Marks are rendered in this order:
 - [ ] Export to SVG format
 
 ### v2.0.0 (Future)
+
 - [ ] Real-time collaborative drawing
 - [ ] User authentication
 - [ ] Cloud storage for annotations and configurations
@@ -456,16 +493,19 @@ Marks are rendered in this order:
 ## Notes
 
 ### General
+
 - Compatible with all modern browsers
 - No additional dependencies required
 - All processing is client-side only
 
 ### Drawing Module
+
 - All exports are client-side only (no server uploads)
 - Drawings are ephemeral (cleared on refresh unless saved)
 - PNG exports preserve chart quality and resolution
 
 ### Track Configuration
+
 - Configuration is client-side and ephemeral (resets on refresh)
 - No performance impact with filtering (reduces rendered data)
 - Works seamlessly with existing data API
@@ -473,6 +513,7 @@ Marks are rendered in this order:
 - Numeric-aware sorting for mixed track names
 
 ### LLM Track Configuration
+
 - Natural language processing for track configuration
 - No training or setup required (uses existing LLM API)
 - JSON-based structured output for reliability
@@ -494,10 +535,10 @@ This project is provided as-is for demonstration purposes.
 ---
 
 For detailed information about any version, please refer to:
+
 - README.md for general usage
 - DRAWING_MODULE.md for drawing features
 - TRACKS_CONFIG_GUIDE.md for track configuration
 - TRACKS_CONFIG_EXAMPLES.md for advanced configuration examples
 - LLM_TRACKS_CONFIG.md for LLM-powered track configuration
 - IMPLEMENTATION_SUMMARY.md for technical details
-

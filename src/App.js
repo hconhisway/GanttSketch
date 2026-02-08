@@ -1,1454 +1,45 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import './App.css';
-import { streamLLMResponse } from './llmConfig';
 import { GANTT_CONFIG, cloneGanttConfig, applyGanttConfigPatch } from './ganttConfig';
 import { GANTT_CONFIG_UI_SPEC } from './ganttConfigUiSpec';
-import { cloneWidgetConfig, applyWidgetConfigPatch } from './widgetConfig';
-import { validateWidget } from './widgetValidator';
-import { GanttDrawingOverlay, DrawingControls } from './GanttDrawingOverlay';
-import { 
-  getEnhancedSystemPrompt, 
-  parseTrackConfigFromResponse, 
-  convertLLMConfigToTracksConfig 
-} from './tracksConfigPrompt';
-import { getWidgetSystemPrompt } from './widgetAgentPrompt';
+import { cloneWidgetConfig } from './widgetConfig';
+import { parseMessageSegments } from './utils/configPatch';
+import { buildProcessStats, processTracksConfig } from './utils/dataProcessing';
+import { pickTextColor, resolveColor, resolveColorKey } from './utils/color';
 import {
-  analyzeAndInitialize,
-  buildSystemPrompt,
-  extractTargetPath
-} from './agents';
+  applyProcessOrderRule,
+  buildPatchForPath,
+  comparePid,
+  inferProcessSortModeFromRule,
+  normalizeProcessOrderRule,
+  resolveThreadLaneMode
+} from './utils/processOrder';
+import { buildTooltipHtml } from './utils/tooltip';
+import { buildWidgetHandler, normalizeWidget } from './utils/widget';
+import { clampNumber, formatTimeUs } from './utils/formatting';
+import { evalExpr, getValueAtPath, hashStringToInt, isEmptyValue } from './utils/expression';
+import { WidgetArea } from './components/WidgetArea';
+import { GanttChart } from './components/GanttChart';
+import { ConfigPanel } from './components/ConfigPanel';
+import { ChatMessages } from './components/ChatMessages';
+import { ImageGallery } from './components/ImageGallery';
+import { ChatInput } from './components/ChatInput';
+import { ConfigEditorModal } from './components/ConfigEditorModal';
+import { WidgetEditorModal } from './components/WidgetEditorModal';
+import { LeftPanel } from './components/LeftPanel';
+import { RightPanel } from './components/RightPanel';
+import { useDataFetching } from './hooks/useDataFetching';
+import { useProcessAggregates } from './hooks/useProcessAggregates';
+import { useChatAgent } from './hooks/useChatAgent';
+import { useGanttChart } from './hooks/useGanttChart';
 
 // API configuration
-const API_URL = "http://127.0.0.1:8080/get-events";
+const API_URL = 'http://127.0.0.1:8080/get-events';
 const FRONTEND_TRACE_URL = `${process.env.PUBLIC_URL || ''}/unet3d_a100--verify-1.pfw`;
 const FRONTEND_TRACE_LABEL = 'unet3d_a100--verify-1.pfw';
 const DEFAULT_END_US = 100_000_000; // 100s, microseconds
 const MERGE_GAP_RATIO = 0.01; // merge gap as fraction of total time window
-const FLAT_CONFIG_ITEMS = GANTT_CONFIG_UI_SPEC.flatMap((domain) => domain.items);
-
-function findConfigItemForPatch(patch) {
-  if (!patch || typeof patch !== 'object') return null;
-  const matches = FLAT_CONFIG_ITEMS
-    .map((item) => ({
-      item,
-      value: getValueAtPath(patch, item.path)
-    }))
-    .filter((entry) => entry.value !== undefined);
-  if (matches.length === 0) return null;
-  matches.sort((a, b) => b.item.path.split('.').length - a.item.path.split('.').length);
-  return matches[0].item;
-}
-
-function parseMessageSegments(content) {
-  const text = String(content ?? '');
-  if (!text.includes('```')) {
-    return [{ type: 'text', content: text }];
-  }
-  const segments = [];
-  const fenceRegex = /```([a-zA-Z0-9_-]+)?\n?([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let match;
-  while ((match = fenceRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      segments.push({
-        type: 'text',
-        content: text.slice(lastIndex, match.index)
-      });
-    }
-    const rawCode = match[2] ?? '';
-    const code = rawCode.replace(/^\n/, '').replace(/\n$/, '');
-    segments.push({
-      type: 'code',
-      language: match[1] || '',
-      content: code
-    });
-    lastIndex = fenceRegex.lastIndex;
-  }
-  if (lastIndex < text.length) {
-    segments.push({ type: 'text', content: text.slice(lastIndex) });
-  }
-  return segments;
-}
-
-function formatTimeUs(us) {
-  const safe = Number(us);
-  if (!Number.isFinite(safe)) return '';
-  const totalMs = Math.max(0, Math.round(safe / 1000));
-  const minutes = Math.floor(totalMs / 60000);
-  const seconds = Math.floor((totalMs % 60000) / 1000);
-  const millis = totalMs % 1000;
-  return `${minutes}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
-}
-
-function formatTimeUsFull(us) {
-  const safe = Number(us);
-  if (!Number.isFinite(safe)) return '';
-  const totalUs = Math.max(0, Math.floor(safe));
-  const totalSec = Math.floor(totalUs / 1_000_000);
-  const usRemainder = totalUs % 1_000_000;
-  const hours = Math.floor(totalSec / 3600);
-  const minutes = Math.floor((totalSec % 3600) / 60);
-  const seconds = totalSec % 60;
-  const nanos = usRemainder * 1000; // keep 9 digits after decimal
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(nanos).padStart(9, '0')}`;
-}
-
-function formatDurationUs(us) {
-  const safe = Number(us);
-  if (!Number.isFinite(safe)) return '';
-  let remaining = Math.max(0, Math.floor(safe));
-  const minutes = Math.floor(remaining / 60_000_000);
-  remaining %= 60_000_000;
-  const seconds = Math.floor(remaining / 1_000_000);
-  remaining %= 1_000_000;
-  const ms = Math.floor(remaining / 1000);
-  const micros = remaining % 1000;
-
-  const parts = [];
-  if (minutes) parts.push(`${minutes}m`);
-  if (seconds) parts.push(`${seconds}s`);
-  if (ms) parts.push(`${ms}ms`);
-  if (micros || parts.length === 0) parts.push(`${micros}µs`);
-  return parts.join(' ');
-}
-
-function extractEventFieldPaths(events, maxFields = 60) {
-  if (!Array.isArray(events) || events.length === 0) return [];
-  const sample = events.slice(0, 50);
-  const fields = new Set();
-
-  const walk = (obj, prefix = '', depth = 0) => {
-    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
-    if (depth > 2) return;
-    Object.keys(obj).forEach((key) => {
-      const next = prefix ? `${prefix}.${key}` : key;
-      fields.add(next);
-      walk(obj[key], next, depth + 1);
-    });
-  };
-
-  sample.forEach((event) => walk(event));
-
-  return Array.from(fields).slice(0, maxFields);
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function formatArgValue(v) {
-  if (v === null || v === undefined) return '';
-  if (typeof v === 'string') return v;
-  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : String(v);
-  if (typeof v === 'boolean') return v ? 'true' : 'false';
-  try {
-    return JSON.stringify(v);
-  } catch {
-    return String(v);
-  }
-}
-
-function clampNumber(value, min, max) {
-  const v = Number(value);
-  const lo = Number(min);
-  const hi = Number(max);
-  if (!Number.isFinite(v) || !Number.isFinite(lo) || !Number.isFinite(hi)) return lo;
-  return Math.min(hi, Math.max(lo, v));
-}
-
-function pickTextColor(hexColor) {
-  // Accept #rgb/#rrggbb; fall back to white for unknown formats
-  if (typeof hexColor !== 'string') return '#fff';
-  const hex = hexColor.trim().replace('#', '');
-  const full = hex.length === 3
-    ? hex.split('').map(ch => ch + ch).join('')
-    : hex;
-  if (full.length !== 6) return '#fff';
-  const r = parseInt(full.slice(0, 2), 16);
-  const g = parseInt(full.slice(2, 4), 16);
-  const b = parseInt(full.slice(4, 6), 16);
-  if (![r, g, b].every(Number.isFinite)) return '#fff';
-  // Relative luminance
-  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  return luminance > 0.6 ? '#111' : '#fff';
-}
-
-function stripScriptTags(html) {
-  if (!html || typeof html !== 'string') return '';
-  return html.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
-}
-
-function toCssSize(value, fallback) {
-  if (value === undefined || value === null) return fallback;
-  if (typeof value === 'number') return `${value}px`;
-  return String(value);
-}
-
-function normalizeWidget(rawWidget) {
-  const base = rawWidget && typeof rawWidget === 'object' ? rawWidget : {};
-  const fallbackId = `widget-${Date.now()}`;
-  const id = String(base.id || fallbackId);
-  const name = String(base.name || base.title || id);
-  const html = stripScriptTags(String(base.html || ''));
-  const rawListeners = Array.isArray(base.listeners) ? base.listeners : [];
-  const listeners = rawListeners
-    .map(listener => ({
-      selector: typeof listener.selector === 'string' ? listener.selector : '',
-      event: typeof listener.event === 'string' ? listener.event : 'change',
-      handler: typeof listener.handler === 'string' ? listener.handler : ''
-    }))
-    .filter(listener => listener.handler);
-  return {
-    id,
-    name,
-    html,
-    listeners,
-    description: base.description ? String(base.description) : ''
-  };
-}
-
-function buildWidgetHandler(source) {
-  if (!source || typeof source !== 'string') return null;
-  const trimmed = source.trim();
-  try {
-    if (trimmed.startsWith('function') || trimmed.startsWith('(')) {
-      const factory = new Function(`return (${source});`);
-      return factory();
-    }
-    return new Function('payload', 'api', 'widget', source);
-  } catch (error) {
-    console.warn('Failed to compile widget handler:', error);
-    return null;
-  }
-}
-
-function hashStringToInt(s) {
-  const str = String(s ?? '');
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = (h * 31 + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h);
-}
-
-function getValueAtPath(obj, path) {
-  if (!obj || !path) return undefined;
-  const parts = String(path).split('.');
-  let cursor = obj;
-  for (const part of parts) {
-    if (cursor && typeof cursor === 'object' && part in cursor) {
-      cursor = cursor[part];
-    } else {
-      return undefined;
-    }
-  }
-  return cursor;
-}
-
-function pickFirstFieldValue(item, fields) {
-  if (!Array.isArray(fields)) return undefined;
-  for (const field of fields) {
-    const value = getValueAtPath(item, field);
-    if (value !== undefined && value !== null && value !== '') {
-      return value;
-    }
-  }
-  return undefined;
-}
-
-function isEmptyValue(value) {
-  return value === undefined || value === null || value === '';
-}
-
-function evalExpr(expr, ctx) {
-  if (expr === undefined || expr === null) return undefined;
-  if (typeof expr !== 'object') return expr;
-  if (Array.isArray(expr)) return expr.map((item) => evalExpr(item, ctx));
-  if (expr.type === 'expr') return evalExpr(expr.expr, ctx);
-  const op = expr.op;
-  if (!op) return expr;
-
-  const args = Array.isArray(expr.args) ? expr.args : [];
-  const evalArg = (index) => evalExpr(args[index], ctx);
-  const evalArgs = () => args.map((item) => evalExpr(item, ctx));
-
-  switch (op) {
-    case 'var': {
-      const name = expr.name;
-      if (ctx && Object.prototype.hasOwnProperty.call(ctx, name)) return ctx[name];
-      if (ctx?.vars && Object.prototype.hasOwnProperty.call(ctx.vars, name)) return ctx.vars[name];
-      return undefined;
-    }
-    case 'get': {
-      const path = expr.path;
-      const fromKey = expr.from;
-      const base = fromKey ? ctx?.[fromKey] : ctx;
-      return getValueAtPath(base, path);
-    }
-    case 'coalesce': {
-      for (const item of args) {
-        const value = evalExpr(item, ctx);
-        if (!isEmptyValue(value)) return value;
-      }
-      return undefined;
-    }
-    case 'concat': {
-      return evalArgs().map((v) => (v === null || v === undefined ? '' : String(v))).join('');
-    }
-    case 'lower':
-      return String(evalArg(0) ?? '').toLowerCase();
-    case 'upper':
-      return String(evalArg(0) ?? '').toUpperCase();
-    case 'trim':
-      return String(evalArg(0) ?? '').trim();
-    case 'len': {
-      const value = evalArg(0);
-      if (Array.isArray(value) || typeof value === 'string') return value.length;
-      return 0;
-    }
-    case 'if': {
-      const cond = Boolean(evalArg(0));
-      return cond ? evalArg(1) : evalArg(2);
-    }
-    case 'case': {
-      const cases = Array.isArray(expr.cases) ? expr.cases : [];
-      for (const entry of cases) {
-        if (!Array.isArray(entry) || entry.length < 2) continue;
-        if (Boolean(evalExpr(entry[0], ctx))) return evalExpr(entry[1], ctx);
-      }
-      return evalExpr(expr.else, ctx);
-    }
-    case '==':
-      return evalArg(0) === evalArg(1);
-    case '!=':
-      return evalArg(0) !== evalArg(1);
-    case '>':
-      return Number(evalArg(0)) > Number(evalArg(1));
-    case '>=':
-      return Number(evalArg(0)) >= Number(evalArg(1));
-    case '<':
-      return Number(evalArg(0)) < Number(evalArg(1));
-    case '<=':
-      return Number(evalArg(0)) <= Number(evalArg(1));
-    case 'and':
-      return evalArgs().every(Boolean);
-    case 'or':
-      return evalArgs().some(Boolean);
-    case 'not':
-      return !Boolean(evalArg(0));
-    case 'add':
-      return evalArgs().reduce((sum, v) => sum + Number(v || 0), 0);
-    case 'sub':
-      return Number(evalArg(0) || 0) - Number(evalArg(1) || 0);
-    case 'mul':
-      return evalArgs().reduce((product, v) => product * Number(v || 0), 1);
-    case 'div': {
-      const denom = Number(evalArg(1) || 0);
-      if (denom === 0) return 0;
-      return Number(evalArg(0) || 0) / denom;
-    }
-    case 'clamp':
-      return clampNumber(evalArg(0), evalArg(1), evalArg(2));
-    case 'regexTest': {
-      const value = String(evalArg(0) ?? '');
-      const pattern = expr.pattern ?? evalArg(1);
-      try {
-        return new RegExp(pattern).test(value);
-      } catch {
-        return false;
-      }
-    }
-    case 'regexCapture': {
-      const value = String(evalArg(0) ?? '');
-      const pattern = expr.pattern ?? evalArg(1);
-      const groupIndex = Number(expr.group ?? evalArg(2) ?? 1);
-      try {
-        const match = value.match(new RegExp(pattern));
-        return match ? match[groupIndex] : '';
-      } catch {
-        return '';
-      }
-    }
-    case 'hash':
-      return hashStringToInt(evalArg(0));
-    case 'paletteHash': {
-      const key = evalArg(0);
-      const palette = evalArg(1);
-      if (!Array.isArray(palette) || palette.length === 0) return '';
-      const hash = hashStringToInt(key);
-      return palette[hash % palette.length];
-    }
-    case 'formatTimeUs':
-      return formatTimeUs(evalArg(0));
-    case 'formatTimeUsFull':
-      return formatTimeUsFull(evalArg(0));
-    case 'formatDurationUs':
-      return formatDurationUs(evalArg(0));
-    default:
-      return undefined;
-  }
-}
-
-function evalPredicate(rule, ctx) {
-  if (!rule) return false;
-  if (rule.type === 'predicate') return Boolean(evalExpr(rule.when, ctx));
-  if (rule.type === 'expr') return Boolean(evalExpr(rule.expr, ctx));
-  if (rule.op) return Boolean(evalExpr(rule, ctx));
-  return Boolean(rule);
-}
-
-function resolveColorKeyLegacy(item, trackKey, trackMeta, colorConfig) {
-  const mode = colorConfig?.mode || 'byField';
-  let keyValue;
-
-  if (mode === 'byTrack') {
-    keyValue = trackKey;
-  } else if (mode === 'byField') {
-    keyValue = pickFirstFieldValue(item, [colorConfig?.field]);
-  } else if (mode === 'byFields') {
-    keyValue = pickFirstFieldValue(item, colorConfig?.fields);
-  }
-
-  if (isEmptyValue(keyValue)) {
-    keyValue = pickFirstFieldValue(item, colorConfig?.fallbackFields);
-  }
-
-  if (isEmptyValue(keyValue)) {
-    const fallbackKey = trackMeta?.type === 'process'
-      ? (item?.pid ?? trackMeta?.pid ?? trackKey ?? '')
-      : `${item?.tid ?? trackMeta?.tid ?? trackKey}-${item?.level ?? trackMeta?.level ?? 0}`;
-    keyValue = fallbackKey;
-  }
-
-  return String(keyValue ?? '');
-}
-
-function resolveColorKey(item, trackKey, trackMeta, colorConfig, legacyColorConfig) {
-  if (colorConfig?.keyRule) {
-    const key = evalExpr(colorConfig.keyRule, {
-      event: item,
-      trackKey,
-      trackMeta,
-      pid: item?.pid ?? trackMeta?.pid,
-      tid: item?.tid ?? trackMeta?.tid,
-      level: item?.level ?? trackMeta?.level
-    });
-    if (!isEmptyValue(key)) return String(key);
-  }
-  if (legacyColorConfig) {
-    return resolveColorKeyLegacy(item, trackKey, trackMeta, legacyColorConfig);
-  }
-  const fallbackKey = trackMeta?.type === 'process'
-    ? (item?.pid ?? trackMeta?.pid ?? trackKey ?? '')
-    : `${item?.tid ?? trackMeta?.tid ?? trackKey}-${item?.level ?? trackMeta?.level ?? 0}`;
-  return String(fallbackKey ?? '');
-}
-
-function resolveColor(item, trackKey, trackMeta, colorConfig, defaultPalette, legacyColorConfig, processStats) {
-  const palette = Array.isArray(colorConfig?.palette) && colorConfig.palette.length > 0
-    ? colorConfig.palette
-    : defaultPalette;
-  const colorKey = resolveColorKey(item, trackKey, trackMeta, colorConfig, legacyColorConfig);
-  if (colorConfig?.fixedColor) {
-    return colorConfig.fixedColor;
-  }
-  if (colorConfig?.colorRule) {
-    const stats = processStats?.get(String(item?.pid ?? trackMeta?.pid)) || {};
-    const resolved = evalExpr(colorConfig.colorRule, {
-      event: item,
-      trackKey,
-      trackMeta,
-      pid: item?.pid ?? trackMeta?.pid,
-      tid: item?.tid ?? trackMeta?.tid,
-      level: item?.level ?? trackMeta?.level,
-      stats,
-      colorKey,
-      palette,
-      vars: { colorKey, palette }
-    });
-    if (!isEmptyValue(resolved)) return String(resolved);
-  }
-  const hash = hashStringToInt(colorKey);
-  return palette[hash % palette.length];
-}
-
-function comparePid(a, b) {
-  const na = parseFloat(a);
-  const nb = parseFloat(b);
-  if (!isNaN(na) && !isNaN(nb)) return na - nb;
-  return String(a).localeCompare(String(b));
-}
-
-function buildProcessStats(events) {
-  const stats = new Map();
-  if (!Array.isArray(events)) return stats;
-  events.forEach((ev) => {
-    const pid = ev?.pid;
-    if (pid === undefined || pid === null) return;
-    const key = String(pid);
-    const start = Number(ev.start ?? ev.timeStart ?? 0);
-    const end = Number(ev.end ?? ev.timeEnd ?? 0);
-    const duration = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : 0;
-    const entry = stats.get(key) || {
-      pid: key,
-      count: 0,
-      totalDurUs: 0,
-      maxDurUs: 0,
-      minStart: Number.POSITIVE_INFINITY,
-      maxEnd: 0
-    };
-    entry.count += 1;
-    entry.totalDurUs += duration;
-    entry.maxDurUs = Math.max(entry.maxDurUs, duration);
-    entry.minStart = Math.min(entry.minStart, start);
-    entry.maxEnd = Math.max(entry.maxEnd, end);
-    stats.set(key, entry);
-  });
-  stats.forEach((entry) => {
-    entry.avgDurUs = entry.count > 0 ? entry.totalDurUs / entry.count : 0;
-    if (!Number.isFinite(entry.minStart)) entry.minStart = 0;
-  });
-  return stats;
-}
-
-function normalizeProcessOrderRule(yAxisConfig, fallbackMode) {
-  if (yAxisConfig?.processOrderRule) return yAxisConfig.processOrderRule;
-  const legacyMode = yAxisConfig?.orderMode || fallbackMode;
-  const includeUnspecified = yAxisConfig?.includeUnspecified !== false;
-  if (legacyMode === 'fork') {
-    return { type: 'transform', name: 'forkTree', params: { includeUnspecified } };
-  }
-  if (legacyMode === 'custom') {
-    return {
-      type: 'transform',
-      name: 'customList',
-      params: { list: yAxisConfig?.customOrder || [], includeUnspecified }
-    };
-  }
-  if (legacyMode === 'grouped') {
-    return {
-      type: 'transform',
-      name: 'groupList',
-      params: { groups: yAxisConfig?.groups || [], includeUnspecified }
-    };
-  }
-  return { type: 'transform', name: 'pidAsc' };
-}
-
-function inferProcessSortModeFromRule(rule) {
-  if (!rule) return 'default';
-  if (rule?.type === 'transform' && rule?.name === 'forkTree') return 'fork';
-  if (rule?.type === 'transform' && rule?.name === 'pipeline') {
-    const steps = Array.isArray(rule?.params?.steps) ? rule.params.steps : [];
-    if (steps.some(step => step?.name === 'forkTree')) return 'fork';
-  }
-  return 'default';
-}
-
-function resolveThreadLaneMode(rule, fallbackMode) {
-  if (rule?.type === 'transform' || rule?.name) {
-    if (rule.name === 'byLevel') return 'level';
-    if (rule.name === 'autoPack') return 'auto';
-  }
-  if (fallbackMode === 'level' || fallbackMode === 'auto') return fallbackMode;
-  return 'auto';
-}
-
-function applyProcessOrderRule(rule, ctx) {
-  const baseOrder = ctx?.pids ? ctx.pids.map(String) : [];
-  let ordered = [...baseOrder];
-  let depthByPid = new Map(ordered.map((pid) => [pid, 0]));
-  if (!rule) return { orderedPids: ordered, depthByPid };
-
-  const getRuleName = (step) => step?.name || step?.op || step?.type;
-  const ruleParams = (step) => step?.params || {};
-
-  const compareByRule = (ruleExpr, order = 'asc') => (a, b) => {
-    const ctxA = { pid: a, stats: ctx.processStats?.get(String(a)) || {}, vars: { pid: a } };
-    const ctxB = { pid: b, stats: ctx.processStats?.get(String(b)) || {}, vars: { pid: b } };
-    const va = evalExpr(ruleExpr, ctxA);
-    const vb = evalExpr(ruleExpr, ctxB);
-    let cmp = 0;
-    if (Number.isFinite(Number(va)) && Number.isFinite(Number(vb))) {
-      cmp = Number(va) - Number(vb);
-    } else {
-      cmp = String(va ?? '').localeCompare(String(vb ?? ''));
-    }
-    if (cmp === 0) {
-      cmp = comparePid(a, b);
-    }
-    return order === 'desc' ? -cmp : cmp;
-  };
-
-  const applyStep = (step) => {
-    if (!step) return;
-    const name = getRuleName(step);
-    const params = ruleParams(step);
-    if (name === 'pidAsc') {
-      ordered = [...ordered].sort(comparePid);
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
-      return;
-    }
-    if (name === 'pidDesc') {
-      ordered = [...ordered].sort((a, b) => -comparePid(a, b));
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
-      return;
-    }
-    if (name === 'filter') {
-      const when = params.when || step.when;
-      ordered = ordered.filter((pid) => evalPredicate(when, {
-        pid,
-        stats: ctx.processStats?.get(String(pid)) || {},
-        vars: { pid }
-      }));
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
-      return;
-    }
-    if (name === 'customList') {
-      const list = Array.isArray(params.list) ? params.list.map(String) : [];
-      const includeUnspecified = params.includeUnspecified !== false;
-      const baseSet = new Set(baseOrder);
-      const nextOrdered = [];
-      const used = new Set();
-      list.forEach((pid) => {
-        if (baseSet.has(pid) && !used.has(pid)) {
-          nextOrdered.push(pid);
-          used.add(pid);
-        }
-      });
-      if (includeUnspecified) {
-        baseOrder.forEach((pid) => {
-          if (!used.has(pid)) {
-            nextOrdered.push(pid);
-            used.add(pid);
-          }
-        });
-      }
-      ordered = nextOrdered.length > 0 ? nextOrdered : baseOrder;
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
-      return;
-    }
-    if (name === 'groupList') {
-      const groups = Array.isArray(params.groups) ? params.groups : [];
-      const includeUnspecified = params.includeUnspecified !== false;
-      const baseSet = new Set(baseOrder);
-      const nextOrdered = [];
-      const used = new Set();
-      const sortedGroups = [...groups].sort((a, b) => (a.order || 0) - (b.order || 0));
-      sortedGroups.forEach((group) => {
-        const groupPids = group?.pids || group?.tracks || group?.items || [];
-        groupPids.forEach((pid) => {
-          const key = String(pid);
-          if (baseSet.has(key) && !used.has(key)) {
-            nextOrdered.push(key);
-            used.add(key);
-          }
-        });
-      });
-      if (includeUnspecified) {
-        baseOrder.forEach((pid) => {
-          if (!used.has(pid)) {
-            nextOrdered.push(pid);
-            used.add(pid);
-          }
-        });
-      }
-      ordered = nextOrdered.length > 0 ? nextOrdered : baseOrder;
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
-      return;
-    }
-    if (name === 'sortBy') {
-      const keyRule = params.key || step.key;
-      const order = params.order || 'asc';
-      ordered = [...ordered].sort(compareByRule(keyRule, order));
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
-      return;
-    }
-    if (name === 'groupBy') {
-      const keyRule = params.key || step.key;
-      const order = params.order || 'asc';
-      const includeUnspecified = params.includeUnspecified !== false;
-      const groupMap = new Map();
-      ordered.forEach((pid) => {
-        const key = evalExpr(keyRule, {
-          pid,
-          stats: ctx.processStats?.get(String(pid)) || {},
-          vars: { pid }
-        });
-        if (isEmptyValue(key)) {
-          if (!includeUnspecified) return;
-        }
-        const groupKey = isEmptyValue(key) ? '__unspecified__' : String(key);
-        if (!groupMap.has(groupKey)) groupMap.set(groupKey, []);
-        groupMap.get(groupKey).push(pid);
-      });
-      const groupKeys = Array.from(groupMap.keys());
-      groupKeys.sort((a, b) => {
-        const cmp = String(a).localeCompare(String(b));
-        return order === 'desc' ? -cmp : cmp;
-      });
-      ordered = groupKeys.flatMap((k) => groupMap.get(k));
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
-      return;
-    }
-    if (name === 'forkTree') {
-      const includeUnspecified = params.includeUnspecified !== false;
-      const tieBreak = params.tieBreak;
-      const canonicalIndex = new Map(baseOrder.map((pid, i) => [String(pid), i]));
-      const existingPids = new Set(baseOrder.map((pid) => String(pid)));
-
-      const fork = ctx.fork;
-      const parentByPidExisting = new Map();
-      const childrenByPidExisting = new Map();
-      if (fork && fork.parentByPid instanceof Map) {
-        for (const pid of existingPids) {
-          const ppid = fork.parentByPid.get(pid);
-          if (!ppid) continue;
-          const ppidStr = String(ppid);
-          if (!existingPids.has(ppidStr)) continue;
-          if (ppidStr === pid) continue;
-          parentByPidExisting.set(pid, ppidStr);
-          if (!childrenByPidExisting.has(ppidStr)) childrenByPidExisting.set(ppidStr, []);
-          childrenByPidExisting.get(ppidStr).push(pid);
-        }
-      }
-
-      const sortList = (list, parentPid) => {
-        if (!tieBreak) {
-          list.sort((a, b) => (canonicalIndex.get(a) ?? 0) - (canonicalIndex.get(b) ?? 0));
-          return;
-        }
-        list.sort((a, b) => {
-          const ctxA = {
-            pid: a,
-            parentPid,
-            stats: ctx.processStats?.get(String(a)) || {},
-            vars: { pid: a, parentPid }
-          };
-          const ctxB = {
-            pid: b,
-            parentPid,
-            stats: ctx.processStats?.get(String(b)) || {},
-            vars: { pid: b, parentPid }
-          };
-          const va = evalExpr(tieBreak, ctxA);
-          const vb = evalExpr(tieBreak, ctxB);
-          let cmp = 0;
-          if (Number.isFinite(Number(va)) && Number.isFinite(Number(vb))) {
-            cmp = Number(va) - Number(vb);
-          } else {
-            cmp = String(va ?? '').localeCompare(String(vb ?? ''));
-          }
-          if (cmp === 0) cmp = (canonicalIndex.get(a) ?? 0) - (canonicalIndex.get(b) ?? 0);
-          return cmp;
-        });
-      };
-
-      for (const [ppid, kids] of childrenByPidExisting.entries()) {
-        sortList(kids, ppid);
-        childrenByPidExisting.set(ppid, kids);
-      }
-
-      const roots = baseOrder
-        .map(String)
-        .filter((pid) => !parentByPidExisting.has(pid));
-      sortList(roots, null);
-
-      const nextOrdered = [];
-      const nextDepth = new Map();
-      const visited = new Set();
-      const dfs = (pid, depth) => {
-        if (!pid || visited.has(pid)) return;
-        visited.add(pid);
-        nextOrdered.push(pid);
-        nextDepth.set(pid, depth);
-        const kids = childrenByPidExisting.get(pid) || [];
-        for (const child of kids) dfs(child, depth + 1);
-      };
-      roots.forEach((pid) => dfs(pid, 0));
-      if (includeUnspecified) {
-        baseOrder.forEach((pid) => {
-          if (!visited.has(pid)) dfs(pid, 0);
-        });
-      }
-
-      ordered = nextOrdered.length > 0 ? nextOrdered : baseOrder;
-      depthByPid = nextDepth.size > 0 ? nextDepth : new Map(ordered.map((pid) => [pid, 0]));
-      return;
-    }
-  };
-
-  if (rule?.type === 'transform' && rule?.name === 'pipeline') {
-    const steps = Array.isArray(rule?.params?.steps) ? rule.params.steps : [];
-    steps.forEach((step) => applyStep(step));
-  } else {
-    applyStep(rule);
-  }
-
-  return { orderedPids: ordered, depthByPid };
-}
-
-function buildPatchForPath(path, value) {
-  if (!path) return {};
-  const parts = String(path).split('.').filter(Boolean);
-  if (parts.length === 0) return {};
-  const patch = {};
-  let cursor = patch;
-  parts.forEach((part, index) => {
-    if (index === parts.length - 1) {
-      cursor[part] = value;
-    } else {
-      cursor[part] = {};
-      cursor = cursor[part];
-    }
-  });
-  return patch;
-}
-
-
-function renderTooltipRows(fields, ctx) {
-  if (!Array.isArray(fields)) return '';
-  return fields.map((field, idx) => {
-    if (!field) return '';
-    const whenRule = field.when;
-    if (whenRule && !evalPredicate(whenRule, ctx)) return '';
-    const labelRaw = field.label ?? field.name ?? `Field ${idx + 1}`;
-    const valueRule = field.value ?? (field.path ? { op: 'get', path: field.path } : null);
-    const label = typeof labelRaw === 'object' ? evalExpr(labelRaw, ctx) : labelRaw;
-    const value = evalExpr(valueRule, ctx);
-    if (isEmptyValue(value) && field.showEmpty !== true) return '';
-    return `
-      <div class="tooltip-row">
-        <span class="tooltip-key">${escapeHtml(label ?? '')}:</span>
-        <span class="tooltip-value">${escapeHtml(value ?? '')}</span>
-      </div>
-    `;
-  }).join('');
-}
-
-function buildTooltipHtml(hit, tooltipConfig, ctx) {
-  if (!tooltipConfig || tooltipConfig.enabled === false) return '';
-  if (hit.area === 'process') {
-    const processConfig = tooltipConfig.process || {};
-    const rows = renderTooltipRows(processConfig.fields, ctx);
-    const title = processConfig.title ?? 'Process';
-    return `
-      <div class="tooltip-grid">
-        <div class="tooltip-col">
-          <div class="tooltip-title">${escapeHtml(title)}</div>
-          ${rows || `<div class="tooltip-muted">No fields</div>`}
-        </div>
-      </div>
-    `;
-  }
-
-  const eventConfig = tooltipConfig.event || {};
-  const rows = renderTooltipRows(eventConfig.fields, ctx);
-  const title = eventConfig.title ?? 'Details';
-  const argsConfig = eventConfig.args || {};
-  const argsEnabled = argsConfig.enabled !== false;
-  const argsLabel = argsConfig.label ?? 'Arguments';
-  const argsMax = Number.isFinite(Number(argsConfig.max)) ? Number(argsConfig.max) : 24;
-
-  let argsHtml = '';
-  let extraHtml = '';
-
-  if (argsEnabled) {
-    const argsObj = (ctx.event?.args && typeof ctx.event.args === 'object') ? ctx.event.args : {};
-    let entries = Object.entries(argsObj);
-    if (argsConfig.sort === 'alpha') {
-      entries = entries.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
-    }
-    if (argsConfig.filter) {
-      entries = entries.filter(([key, value]) => evalPredicate(argsConfig.filter, {
-        ...ctx,
-        argKey: key,
-        argValue: value,
-        vars: { ...(ctx.vars || {}), argKey: key, argValue: value }
-      }));
-    }
-    const shownArgs = entries.slice(0, Math.max(0, argsMax));
-    const remainingCount = Math.max(0, entries.length - shownArgs.length);
-    argsHtml = shownArgs.length > 0
-      ? shownArgs.map(([k, v]) => {
-        const valueRule = argsConfig.value || null;
-        const formattedValue = valueRule
-          ? evalExpr(valueRule, {
-              ...ctx,
-              argKey: k,
-              argValue: v,
-              vars: { ...(ctx.vars || {}), argKey: k, argValue: v }
-            })
-          : formatArgValue(v);
-        return `
-          <div class="tooltip-row">
-            <span class="tooltip-key">${escapeHtml(k)}:</span>
-            <span class="tooltip-value">${escapeHtml(formattedValue)}</span>
-          </div>
-        `;
-      }).join('')
-      : `<div class="tooltip-muted">No arguments</div>`;
-    extraHtml = remainingCount > 0
-      ? `<div class="tooltip-muted">… (+${remainingCount} more)</div>`
-      : '';
-  }
-
-  if (!argsEnabled) {
-    return `
-      <div class="tooltip-grid">
-        <div class="tooltip-col">
-          <div class="tooltip-title">${escapeHtml(title)}</div>
-          ${rows || `<div class="tooltip-muted">No fields</div>`}
-        </div>
-      </div>
-    `;
-  }
-
-  return `
-    <div class="tooltip-grid">
-      <div class="tooltip-col">
-        <div class="tooltip-title">${escapeHtml(title)}</div>
-        ${rows || `<div class="tooltip-muted">No fields</div>`}
-      </div>
-      <div class="tooltip-col">
-        <div class="tooltip-title">${escapeHtml(argsLabel)}</div>
-        ${argsHtml}
-        ${extraHtml}
-      </div>
-    </div>
-  `;
-}
-
-// Fetch data from API
-async function fetchData(begin, end, bins, apiUrl) {
-  try {
-    const response = await fetch(`${apiUrl}?begin=${begin}&end=${end}`);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    
-    const rawData = await response.json();
-    return rawData;
-  } catch (error) {
-    console.error('Error fetching data:', error);
-    throw error;
-  }
-}
-
-function parseFrontendTraceText(text) {
-  const trimmed = String(text || '').trim();
-  if (!trimmed) return [];
-
-  if (trimmed.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {
-      // Fall through to line-based parsing.
-    }
-  }
-
-  const events = [];
-  const lines = trimmed.split(/\r?\n/);
-  lines.forEach((line) => {
-    const raw = line.trim();
-    if (!raw || raw === '[' || raw === ']') return;
-    const normalized = raw.endsWith(',') ? raw.slice(0, -1) : raw;
-    try {
-      events.push(JSON.parse(normalized));
-    } catch (e) {
-      // Skip malformed lines but keep parsing others.
-    }
-  });
-  return events;
-}
-
-function buildFrontendPayloadFromText(text) {
-  const events = parseFrontendTraceText(text);
-  if (!Array.isArray(events) || events.length === 0) {
-    throw new Error('Trace file is empty or invalid.');
-  }
-  return { events, metadata: { count: events.length, source: 'frontend' } };
-}
-
-async function fetchFrontendData(traceUrl) {
-  const response = await fetch(traceUrl, { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error(`Frontend trace not found (${response.status}) at ${traceUrl}`);
-  }
-  const text = await response.text();
-  try {
-    return buildFrontendPayloadFromText(text);
-  } catch (e) {
-    const msg = e?.message || 'invalid trace format';
-    throw new Error(`Frontend trace file is invalid: ${msg}`);
-  }
-}
-
-async function fetchDataWithFallback(begin, end, bins, apiUrl, traceUrl, localTraceText) {
-  if (localTraceText) {
-    try {
-      return buildFrontendPayloadFromText(localTraceText);
-    } catch (e) {
-      console.warn('[data] local upload invalid, ignoring:', e);
-      // Fall through to backend/frontend attempts.
-    }
-  }
-
-  try {
-    return await fetchData(begin, end, bins, apiUrl);
-  } catch (backendError) {
-    console.warn('[data] backend unavailable, falling back to frontend trace:', backendError);
-    try {
-      return await fetchFrontendData(traceUrl);
-    } catch (fallbackError) {
-      const backendMsg = backendError?.message || 'unknown backend error';
-      const fallbackMsg = fallbackError?.message || 'unknown frontend error';
-      const err = new Error(`Backend unavailable (${backendMsg}); frontend fallback failed (${fallbackMsg}).`);
-      err.needsUpload = true;
-      throw err;
-    }
-  }
-}
-
-function extractForkFieldsFromRawEvent(ev) {
-  const raw =
-    ev?.Raw ??
-    ev?.raw ??
-    ev?.enter?.Raw ??
-    ev?.enter?.raw ??
-    ev?.leave?.Raw ??
-    ev?.leave?.raw ??
-    ev;
-
-  const args =
-    raw?.args ??
-    ev?.args ??
-    ev?.enter?.args ??
-    ev?.leave?.args ??
-    {};
-
-  const nameValue =
-    raw?.name ??
-    ev?.name ??
-    raw?.Name ??
-    ev?.Name ??
-    args?.name ??
-    ev?.Primitive ??
-    raw?.Primitive ??
-    '';
-
-  const pidValue =
-    raw?.pid ??
-    ev?.pid ??
-    raw?.PID ??
-    ev?.PID ??
-    args?.pid ??
-    args?.PID ??
-    args?.processId ??
-    args?.process_id ??
-    ev?.Location ??
-    'unknown';
-
-  const ppidValue =
-    raw?.ppid ??
-    ev?.ppid ??
-    raw?.PPID ??
-    ev?.PPID ??
-    args?.ppid ??
-    args?.PPID ??
-    args?.parentPid ??
-    args?.parent_pid ??
-    args?.parentProcessId ??
-    args?.parent_process_id ??
-    null;
-
-  const pid = (pidValue === undefined || pidValue === null) ? '' : String(pidValue);
-  const ppid = (ppidValue === undefined || ppidValue === null) ? null : String(ppidValue);
-  const name = String(nameValue ?? '');
-
-  return { pid, ppid, name, args, raw };
-}
-
-// Build pid fork relationships from *raw* events (unfiltered).
-// Rule: for each event where name === 'start', the event's pid is a child of its ppid.
-function buildProcessForkRelationsFromRawEvents(rawEvents) {
-  const parentByPid = new Map();   // pid -> ppid
-  const childrenByPid = new Map(); // ppid -> [pid...]
-  const edges = [];               // [{ ppid, pid }]
-  const conflicts = [];
-  let startEventCount = 0;
-  let missingPpidCount = 0;
-  let missingPidCount = 0;
-  let startContainsCount = 0;
-  const startNameExamples = [];
-  const ppidSourceHits = {
-    raw_ppid: 0,
-    ev_ppid: 0,
-    args_ppid: 0,
-    args_PPID: 0,
-    args_parentPid: 0,
-    args_parent_pid: 0
-  };
-
-  if (!Array.isArray(rawEvents)) {
-    return {
-      parentByPid, childrenByPid, edges, conflicts,
-      startEventCount, missingPpidCount, missingPidCount,
-      debug: { startContainsCount, startNameExamples, ppidSourceHits }
-    };
-  }
-
-  for (const ev of rawEvents) {
-    const { pid, ppid, name, args, raw } = extractForkFieldsFromRawEvent(ev);
-    const nameLower = String(name || '').toLowerCase();
-
-    if (nameLower.includes('start') && nameLower !== 'start') {
-      startContainsCount += 1;
-      if (startNameExamples.length < 10 && !startNameExamples.includes(name)) {
-        startNameExamples.push(name);
-      }
-    }
-
-    if (nameLower !== 'start') continue;
-    startEventCount += 1;
-
-    if (!pid) {
-      missingPidCount += 1;
-      continue;
-    }
-
-    // Extra source diagnostics (for "why ppid is missing")
-    if (raw && raw.ppid !== undefined && raw.ppid !== null) ppidSourceHits.raw_ppid += 1;
-    if (ev && ev.ppid !== undefined && ev.ppid !== null) ppidSourceHits.ev_ppid += 1;
-    if (args && args.ppid !== undefined && args.ppid !== null) ppidSourceHits.args_ppid += 1;
-    if (args && args.PPID !== undefined && args.PPID !== null) ppidSourceHits.args_PPID += 1;
-    if (args && args.parentPid !== undefined && args.parentPid !== null) ppidSourceHits.args_parentPid += 1;
-    if (args && args.parent_pid !== undefined && args.parent_pid !== null) ppidSourceHits.args_parent_pid += 1;
-
-    if (ppid === undefined || ppid === null || ppid === '') {
-      missingPpidCount += 1;
-      continue;
-    }
-    if (pid === ppid) continue;
-
-    if (parentByPid.has(pid)) {
-      const existing = parentByPid.get(pid);
-      if (existing !== ppid) {
-        conflicts.push({ pid, ppidExisting: existing, ppidNew: ppid });
-      }
-      continue;
-    }
-
-    parentByPid.set(pid, ppid);
-    edges.push({ ppid, pid });
-
-    if (!childrenByPid.has(ppid)) childrenByPid.set(ppid, []);
-    childrenByPid.get(ppid).push(pid);
-  }
-
-  return {
-    parentByPid,
-    childrenByPid,
-    edges,
-    conflicts,
-    startEventCount,
-    missingPpidCount,
-    missingPidCount,
-    debug: { startContainsCount, startNameExamples, ppidSourceHits }
-  };
-}
-
-// Build pid fork relationships from the *normalized* (duration-filtered) event stream.
-// Kept as a fallback when raw events are not available.
-function buildProcessForkRelations(events) {
-  const parentByPid = new Map();   // pid -> ppid
-  const childrenByPid = new Map(); // ppid -> [pid...]
-  const edges = [];               // [{ ppid, pid }]
-  const conflicts = [];
-  let startEventCount = 0;
-  let missingPpidCount = 0;
-
-  if (!Array.isArray(events)) {
-    return { parentByPid, childrenByPid, edges, conflicts, startEventCount, missingPpidCount };
-  }
-
-  for (const ev of events) {
-    const nameLower = String(ev?.name ?? '').toLowerCase();
-    if (!ev || nameLower !== 'start') continue;
-    startEventCount += 1;
-
-    const pid = ev.pid === undefined || ev.pid === null ? '' : String(ev.pid);
-    if (!pid) continue;
-
-    const ppidValue = ev.ppid ?? ev.args?.ppid ?? ev.args?.PPID;
-    if (ppidValue === undefined || ppidValue === null) {
-      missingPpidCount += 1;
-      continue;
-    }
-    const ppid = String(ppidValue);
-    if (!ppid || pid === ppid) continue;
-
-    if (parentByPid.has(pid)) {
-      const existing = parentByPid.get(pid);
-      if (existing !== ppid) {
-        conflicts.push({ pid, ppidExisting: existing, ppidNew: ppid });
-      }
-      continue;
-    }
-
-    parentByPid.set(pid, ppid);
-    edges.push({ ppid, pid });
-
-    if (!childrenByPid.has(ppid)) childrenByPid.set(ppid, []);
-    childrenByPid.get(ppid).push(pid);
-  }
-
-  return { parentByPid, childrenByPid, edges, conflicts, startEventCount, missingPpidCount };
-}
-
-// Transform raw data to event list (microseconds, relative time starting at 0)
-// Preserves ALL original fields while adding standard internal fields for chart rendering
-function transformData(rawData) {
-  if (!rawData) return [];
-
-  // New event API: { events: [...], metadata: { begin, end, count } }
-  if (Array.isArray(rawData.events)) {
-    const events = rawData.events
-      .map((ev) => {
-        const raw = ev.Raw ?? ev.raw ?? ev;
-        const args = raw.args ?? ev.args ?? {};
-        const pid = raw.pid ?? ev.pid ?? ev.Location ?? 'unknown';
-        const tid = raw.tid ?? ev.tid ?? pid;
-        const ppidValue = raw.ppid ?? ev.ppid ?? args.ppid ?? args.PPID;
-        const ppid = (ppidValue === undefined || ppidValue === null) ? null : String(ppidValue);
-        const levelRaw = args.level ?? raw.level ?? ev.level ?? 0;
-        const level = Number.isFinite(Number(levelRaw)) ? Number(levelRaw) : 0;
-
-        // Prefer relative microsecond timestamps if present
-        const startCandidate = ev.enter?.Timestamp ?? ev.Timestamp ?? raw.ts ?? ev.ts;
-        const durCandidate = raw.dur ?? ev.dur ?? 0;
-        const endCandidate = ev.leave?.Timestamp ?? (startCandidate !== undefined ? Number(startCandidate) + Number(durCandidate) : undefined);
-
-        const start = Number(startCandidate);
-        const end = Number(endCandidate);
-        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
-
-        // Preserve ALL original fields, then add/override with internal fields
-        return {
-          ...raw,  // Preserve all original fields (ts, dur, etc.)
-          ...ev,   // Preserve wrapper fields if any
-          // Internal fields for chart rendering (these override if they exist in original)
-          pid: String(pid),
-          tid: String(tid),
-          ppid,
-          level,
-          start, // microseconds
-          end,   // microseconds
-          id: raw.id ?? ev.id ?? ev.GUID ?? ev.intervalId ?? null,
-          name: raw.name ?? ev.name ?? ev.Primitive ?? '',
-          cat: raw.cat ?? ev.cat ?? '',
-          args
-        };
-      })
-      .filter(Boolean);
-
-    // Ensure timeline starts at 0 if backend returns absolute timestamps
-    // Heuristic: epoch-microseconds are ~1e15; relative traces are typically < 1e11.
-    const minStart = events.length > 0 ? Math.min(...events.map(e => e.start)) : 0;
-    if (minStart > 1e12) {
-      events.forEach((e) => {
-        e.start -= minStart;
-        e.end -= minStart;
-        // Also adjust original time fields if they exist (to maintain consistency)
-        if (typeof e.ts === 'number') e.ts -= minStart;
-        if (typeof e.timestamp === 'number') e.timestamp -= minStart;
-      });
-    }
-
-    // Sort for later binary search / merging
-    events.sort((a, b) => a.start - b.start);
-    return events;
-  }
-
-  // Legacy util API fallback: { metadata:{begin,end,bins}, data:[{track,utils}] }
-  if (Array.isArray(rawData.data) && rawData.metadata) {
-    const metaBegin = rawData.metadata.begin ?? 0;
-    const metaEnd = rawData.metadata.end ?? 0;
-    const metaBins = rawData.metadata.bins || 1;
-    const binDuration = metaBins > 0 ? (metaEnd - metaBegin) / metaBins : 0;
-
-    const events = [];
-    rawData.data.forEach((item) => {
-      const pid = item.pid ?? item.process ?? item.track ?? 'unknown';
-      const tid = item.tid ?? item.thread ?? item.track ?? pid;
-      const level = Number.isFinite(Number(item.level)) ? Number(item.level) : 0;
-      const utils = item.utils || [];
-
-      utils.forEach((utilValue, binIndex) => {
-        const utilFloat = parseFloat(utilValue);
-        if (!isFinite(utilFloat) || utilFloat <= 0) return;
-        const start = metaBegin + binIndex * binDuration;
-        const end = start + binDuration;
-        events.push({
-          pid: String(pid),
-          tid: String(tid),
-          level,
-          start,
-          end,
-          id: `${pid}-${binIndex}`,
-          name: 'util',
-          cat: 'util',
-          args: { util: utilFloat }
-        });
-      });
-    });
-    events.sort((a, b) => a.start - b.start);
-    return events;
-  }
-
-  return [];
-}
-
-/**
- * Process tracks with sorting, grouping, and filtering
- * @param {Array} data - The chart data
- * @param {Object} config - Configuration object
- * @param {string} config.sortMode - 'asc', 'desc', 'custom', or 'grouped'
- * @param {Function} config.customSort - Custom sorting function (track1, track2) => number
- * @param {Array} config.groups - Array of group objects: [{ name: string, tracks: string[], order: number }]
- * @param {Function} config.filter - Filter function (track) => boolean
- * @param {Array} config.trackList - Explicit list of tracks to show
- * @returns {Object} - { processedData, trackOrder, trackGroups }
- */
-function processTracksConfig(data, config = {}) {
-  const {
-    sortMode = 'asc',
-    customSort = null,
-    groups = null,
-    filter = null,
-    trackList = null
-  } = config;
-  
-  // Get unique tracks from data
-  let uniqueTracks = [...new Set(data.map(d => d.track))];
-  
-  // Apply filtering
-  let filteredTracks = uniqueTracks;
-  if (trackList && trackList.length > 0) {
-    // Use explicit track list
-    filteredTracks = trackList.filter(track => uniqueTracks.includes(track));
-  } else if (filter) {
-    // Use filter function
-    filteredTracks = uniqueTracks.filter(filter);
-  }
-  
-  // Filter data to only include selected tracks
-  const filteredData = data.filter(d => filteredTracks.includes(d.track));
-  
-  // Apply sorting or grouping
-  let trackOrder = [];
-  let trackGroups = null;
-  
-  if (sortMode === 'grouped' && groups && groups.length > 0) {
-    // Group mode
-    trackGroups = [];
-    const assignedTracks = new Set();
-    
-    // Sort groups by order
-    const sortedGroups = [...groups].sort((a, b) => (a.order || 0) - (b.order || 0));
-    
-    sortedGroups.forEach((group, groupIndex) => {
-      const groupTracks = group.tracks.filter(track => 
-        filteredTracks.includes(track) && !assignedTracks.has(track)
-      );
-      
-      if (groupTracks.length > 0) {
-        trackGroups.push({
-          name: group.name,
-          tracks: groupTracks
-        });
-        groupTracks.forEach(track => assignedTracks.add(track));
-        trackOrder.push(...groupTracks);
-        
-        // Add spacer between groups (except after the last group)
-        if (groupIndex < sortedGroups.length - 1) {
-          trackOrder.push(`__spacer_${groupIndex}__`);
-        }
-      }
-    });
-    
-    // Add ungrouped tracks at the end
-    const ungroupedTracks = filteredTracks.filter(track => !assignedTracks.has(track));
-    if (ungroupedTracks.length > 0) {
-      // Sort ungrouped tracks
-      ungroupedTracks.sort((a, b) => {
-        if (typeof a === 'string' && typeof b === 'string') {
-          const numA = parseFloat(a);
-          const numB = parseFloat(b);
-          if (!isNaN(numA) && !isNaN(numB)) {
-            return numA - numB;
-          }
-          return a.localeCompare(b);
-        }
-        return 0;
-      });
-      
-      // Add spacer before ungrouped tracks if there are any grouped tracks
-      if (trackGroups.length > 0) {
-        trackOrder.push(`__spacer_ungrouped__`);
-      }
-      
-      trackGroups.push({
-        name: 'Other',
-        tracks: ungroupedTracks
-      });
-      trackOrder.push(...ungroupedTracks);
-    }
-  } else if (sortMode === 'custom' && customSort) {
-    // Custom sorting function
-    trackOrder = [...filteredTracks].sort(customSort);
-  } else if (sortMode === 'desc') {
-    // Descending order
-    trackOrder = [...filteredTracks].sort((a, b) => {
-      if (typeof a === 'string' && typeof b === 'string') {
-        const numA = parseFloat(a);
-        const numB = parseFloat(b);
-        if (!isNaN(numA) && !isNaN(numB)) {
-          return numB - numA;
-        }
-        return b.localeCompare(a);
-      }
-      return 0;
-    });
-  } else {
-    // Default: ascending order
-    trackOrder = [...filteredTracks].sort((a, b) => {
-      if (typeof a === 'string' && typeof b === 'string') {
-        const numA = parseFloat(a);
-        const numB = parseFloat(b);
-        if (!isNaN(numA) && !isNaN(numB)) {
-          return numA - numB;
-        }
-        return a.localeCompare(b);
-      }
-      return 0;
-    });
-  }
-  
-  return {
-    processedData: filteredData,
-    trackOrder,
-    trackGroups
-  };
-}
 
 function App() {
   const chartRef = useRef();
@@ -1483,16 +74,14 @@ function App() {
   const [processAggregates, setProcessAggregates] = useState(new Map());
   const [threadsByPid, setThreadsByPid] = useState(new Map());
   const [expandedPids, setExpandedPids] = useState([]);
-  const [yAxisWidth, setYAxisWidth] = useState(
-    GANTT_CONFIG?.layout?.yAxis?.baseWidth ?? 180
-  );
-  
+  const [yAxisWidth, setYAxisWidth] = useState(GANTT_CONFIG?.layout?.yAxis?.baseWidth ?? 180);
+
   // Chat state
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState('');
-  
+
   // Drawing state
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [brushSize, setBrushSize] = useState(3);
@@ -1504,11 +93,11 @@ function App() {
   const [localTraceText, setLocalTraceText] = useState('');
   const [localTraceName, setLocalTraceName] = useState('');
   const [showUploadPrompt, setShowUploadPrompt] = useState(false);
-  
+
   // Image storage for LLM
   const [savedImages, setSavedImages] = useState([]);
   const [selectedImageId, setSelectedImageId] = useState(null);
-  
+
   // Tracks configuration
   const [tracksConfig, setTracksConfig] = useState({
     sortMode: 'asc', // 'asc', 'desc', 'custom', 'grouped'
@@ -1517,6 +106,12 @@ function App() {
     filter: null,
     trackList: null
   });
+
+  const trackConfigResult = useMemo(
+    () => processTracksConfig(data, tracksConfig),
+    [data, tracksConfig]
+  );
+  const chartData = trackConfigResult.processedData;
 
   // Config UI editor state
   const [activeConfigItem, setActiveConfigItem] = useState(null);
@@ -1537,6 +132,78 @@ function App() {
   const [widgetEditorError, setWidgetEditorError] = useState('');
   const [widgetHighlightId, setWidgetHighlightId] = useState(null);
   const widgetHighlightTimeoutRef = useRef(null);
+
+  useDataFetching({
+    obd,
+    startTime,
+    endTime,
+    bins,
+    localTraceText,
+    dataSchema,
+    fieldMapping,
+    ganttConfig,
+    apiUrl: API_URL,
+    traceUrl: FRONTEND_TRACE_URL,
+    defaultEndUs: DEFAULT_END_US,
+    setIsFetching,
+    setData,
+    setDataSchema,
+    setFieldMapping,
+    setGanttConfig,
+    setProcessSortMode,
+    setMessages,
+    setObd,
+    setEndTime,
+    setError,
+    setShowUploadPrompt,
+    setLoading,
+    setViewRange,
+    fetchRangeRef,
+    viewRangeRef,
+    redrawRef,
+    viewRange,
+    forkRelationsRef,
+    forkLoggedRef
+  });
+
+  useProcessAggregates({
+    data: chartData,
+    obd,
+    startTime,
+    endTime,
+    mergeGapRatio: MERGE_GAP_RATIO,
+    setThreadsByPid,
+    setProcessAggregates,
+    setExpandedPids,
+    threadsByPid,
+    processAggregates
+  });
+
+  const processStats = useMemo(() => buildProcessStats(chartData), [chartData]);
+  const processOrderRule = useMemo(
+    () => normalizeProcessOrderRule(ganttConfig?.yAxis || {}, processSortMode),
+    [ganttConfig, processSortMode]
+  );
+  const threadOrderMode = useMemo(
+    () =>
+      resolveThreadLaneMode(
+        ganttConfig?.yAxis?.threadLaneRule,
+        ganttConfig?.yAxis?.thread?.orderMode
+      ),
+    [ganttConfig]
+  );
+  const orderResult = useMemo(() => {
+    const pids = Array.from(processAggregates.keys());
+    if (pids.length === 0) {
+      return { orderedPids: [], depthByPid: new Map() };
+    }
+    pids.sort(comparePid);
+    return applyProcessOrderRule(processOrderRule, {
+      pids,
+      fork: forkRelationsRef.current,
+      processStats
+    });
+  }, [processAggregates, processOrderRule, processStats]);
 
   useEffect(() => {
     ganttConfigRef.current = ganttConfig;
@@ -1575,22 +242,22 @@ function App() {
     const host = widgetAreaRef.current;
     if (!host) return;
 
-    widgetHandlersRef.current.forEach(binding => {
+    widgetHandlersRef.current.forEach((binding) => {
       binding.element.removeEventListener(binding.event, binding.handler);
     });
     widgetHandlersRef.current = [];
 
-    widgets.forEach(widget => {
+    widgets.forEach((widget) => {
       const widgetRoot = host.querySelector(`[data-widget-id="${widget.id}"]`);
       if (!widgetRoot) return;
       const listeners = Array.isArray(widget.listeners) ? widget.listeners : [];
-      listeners.forEach(listener => {
+      listeners.forEach((listener) => {
         const handlerFn = buildWidgetHandler(listener.handler);
         if (!handlerFn) return;
         const elements = listener.selector
           ? widgetRoot.querySelectorAll(listener.selector)
           : [widgetRoot];
-        elements.forEach(element => {
+        elements.forEach((element) => {
           const eventName = listener.event || 'change';
           const wrapped = (event) => {
             const payload = {
@@ -1610,337 +277,8 @@ function App() {
     });
   }, [widgets]);
 
-  // Fetch and transform data when parameters change
-  useEffect(() => {
-    if (!obd) return;
-
-    const loadData = async () => {
-      try {
-        setIsFetching(true);
-        const rawData = await fetchDataWithFallback(
-          startTime,
-          endTime,
-          bins,
-          API_URL,
-          FRONTEND_TRACE_URL,
-          localTraceText
-        );
-        
-        // Process data - detect schema on first load, use existing mapping for subsequent loads
-        let transformed;
-        let analysisResult = null;
-        
-        // First time loading: detect schema and create field mapping
-        if (!dataSchema && Array.isArray(rawData?.events) && rawData.events.length > 0) {
-          try {
-            console.log('Running Data Analysis Agent for schema detection...');
-            analysisResult = await analyzeAndInitialize(rawData.events);
-            
-            if (analysisResult.events && analysisResult.events.length > 0) {
-              // Use processed events (original fields preserved, internal _start/_end added)
-              transformed = analysisResult.events;
-              console.log(`Processed ${transformed.length} events (original field names preserved)`);
-            } else {
-              // Fallback to legacy transform
-              console.log('Schema detection returned no events, using legacy transform');
-              transformed = transformData(rawData);
-            }
-          } catch (err) {
-            console.error('Schema detection failed, using legacy transform:', err);
-            transformed = transformData(rawData);
-          }
-        } else {
-          // Subsequent loads: use legacy transform (schema already detected)
-          // TODO: Apply existing fieldMapping to new data
-          transformed = transformData(rawData);
-        }
-
-        // Build pid fork relations from raw events first (start events may be instantaneous and
-        // get filtered out by transformData, so using transformed alone can miss forks).
-        const forkFromRaw = Array.isArray(rawData?.events)
-          ? buildProcessForkRelationsFromRawEvents(rawData.events)
-          : null;
-        const forkFromTransformed = buildProcessForkRelations(transformed);
-        const forkRelations = (forkFromRaw && forkFromRaw.edges.length > 0)
-          ? forkFromRaw
-          : forkFromTransformed;
-
-        // Don't wipe previously computed relations when a later fetch window lacks start events.
-        if (forkRelations && forkRelations.parentByPid instanceof Map) {
-          const prev = forkRelationsRef.current;
-          const prevEdgeCount = Array.isArray(prev?.edges) ? prev.edges.length : 0;
-          const nextEdgeCount = Array.isArray(forkRelations.edges) ? forkRelations.edges.length : 0;
-          if (prev && prev.parentByPid instanceof Map && prevEdgeCount > 0 && nextEdgeCount === 0) {
-            // keep prev
-          } else if (prev && prev.parentByPid instanceof Map && prevEdgeCount > 0 && nextEdgeCount > 0) {
-            // merge: pid -> ppid (keep first, warn on conflicts)
-            const mergedParent = new Map(prev.parentByPid);
-            const mergedConflicts = [...(prev.conflicts || []), ...(forkRelations.conflicts || [])];
-            for (const [pid, ppid] of forkRelations.parentByPid.entries()) {
-              if (!mergedParent.has(pid)) {
-                mergedParent.set(pid, ppid);
-              } else if (mergedParent.get(pid) !== ppid) {
-                mergedConflicts.push({ pid, ppidExisting: mergedParent.get(pid), ppidNew: ppid });
-              }
-            }
-            const mergedChildren = new Map();
-            const mergedEdges = [];
-            for (const [pid, ppid] of mergedParent.entries()) {
-              mergedEdges.push({ ppid, pid });
-              if (!mergedChildren.has(ppid)) mergedChildren.set(ppid, []);
-              mergedChildren.get(ppid).push(pid);
-            }
-            forkRelationsRef.current = {
-              ...forkRelations,
-              parentByPid: mergedParent,
-              childrenByPid: mergedChildren,
-              edges: mergedEdges,
-              conflicts: mergedConflicts
-            };
-          } else {
-            forkRelationsRef.current = forkRelations;
-          }
-        }
-
-        if (!forkLoggedRef.current && Array.isArray(transformed) && transformed.length > 0) {
-          forkLoggedRef.current = true;
-          try {
-            const MAX_VERBOSE = 500;
-            const MAX_EDGE_LOG = 200;
-            const rel = forkRelationsRef.current || forkRelations;
-            const edgeSample = rel.edges.length > MAX_EDGE_LOG
-              ? rel.edges.slice(0, MAX_EDGE_LOG)
-              : rel.edges;
-
-            console.groupCollapsed(
-              `[fork] edges=${rel.edges.length}, startEvents=${rel.startEventCount}, missingPid=${rel.missingPidCount ?? 0}, missingPpid=${rel.missingPpidCount}`
-            );
-            console.log('edges sample (ppid -> pid):', edgeSample);
-            if (rel.edges.length > MAX_EDGE_LOG) {
-              console.log(`... +${rel.edges.length - MAX_EDGE_LOG} more edges`);
-            }
-
-            if (rel.parentByPid.size <= MAX_VERBOSE) {
-              console.log('parentByPid:', Object.fromEntries(rel.parentByPid.entries()));
-            } else {
-              console.log('parentByPid (Map):', rel.parentByPid);
-            }
-
-            if (rel.childrenByPid.size <= MAX_VERBOSE) {
-              console.log(
-                'childrenByPid:',
-                Object.fromEntries([...rel.childrenByPid.entries()].map(([ppid, children]) => [ppid, [...children]]))
-              );
-            } else {
-              console.log('childrenByPid (Map):', rel.childrenByPid);
-            }
-
-            if (rel.conflicts && rel.conflicts.length > 0) {
-              console.warn('conflicts:', rel.conflicts);
-            }
-
-            // If still no edges, print a small diagnostic snapshot to match against input schema.
-            if (rel.edges.length === 0) {
-              console.warn('[fork] no edges detected. Debug snapshot:', {
-                rawStartContainsCount: forkFromRaw?.debug?.startContainsCount ?? 0,
-                rawStartNameExamples: forkFromRaw?.debug?.startNameExamples ?? [],
-                rawPpidSourceHits: forkFromRaw?.debug?.ppidSourceHits ?? null,
-                rawStartEventCount: forkFromRaw?.startEventCount ?? null,
-                rawMissingPid: forkFromRaw?.missingPidCount ?? null,
-                rawMissingPpid: forkFromRaw?.missingPpidCount ?? null
-              });
-            }
-            console.groupEnd();
-          } catch (e) {
-            // Never break data load due to debug logging.
-            console.warn('[fork] failed to log fork relations:', e);
-          }
-        }
-
-        setData(transformed);
-        
-        // Apply analysis results if we detected schema on this load
-        if (analysisResult && analysisResult.schema && analysisResult.schema.fields && !dataSchema) {
-          setDataSchema(analysisResult.schema);
-          setFieldMapping(analysisResult.fieldMapping);
-          console.log('Data schema detected:', analysisResult.schema);
-          console.log('Field mapping:', analysisResult.fieldMapping);
-          
-          // Apply initial config if one was generated
-          if (analysisResult.config && Object.keys(analysisResult.config).length > 0) {
-            console.log('Applying initial config:', analysisResult.config);
-            const nextConfig = applyGanttConfigPatch(ganttConfig, analysisResult.config);
-            setGanttConfig(nextConfig);
-            
-            // Update process sort mode if yAxis config was changed
-            if (analysisResult.config.yAxis?.processOrderRule) {
-              setProcessSortMode(
-                inferProcessSortModeFromRule(analysisResult.config.yAxis.processOrderRule)
-              );
-            }
-            
-            setMessages(prev => [
-              ...prev,
-              {
-                role: 'system',
-                content: `Info: Data schema auto-detected with ${analysisResult.schema.fields.length} fields. Initial configuration applied.`
-              }
-            ]);
-          }
-        }
-        
-        // Auto-fit time range (slider max) to real data end (max event end), when we are viewing the full current range.
-        if (transformed && transformed.length > 0) {
-          const dataMaxEnd = transformed.reduce((max, e) => Math.max(max, Number(e.end) || 0), 0);
-          if (Number.isFinite(dataMaxEnd) && dataMaxEnd > 0) {
-            const prevMax = Array.isArray(obd) ? Number(obd[1]) : DEFAULT_END_US;
-            const atCurrentMax = Number(endTime) >= prevMax;
-            if (atCurrentMax && Math.abs(dataMaxEnd - prevMax) > 1) {
-              setObd([0, Math.ceil(dataMaxEnd), 1]);
-              if (Number(endTime) > dataMaxEnd) setEndTime(Math.ceil(dataMaxEnd));
-            } else if (dataMaxEnd > prevMax) {
-              // Never block exploration if we discover data extends beyond current max
-              setObd([0, Math.ceil(dataMaxEnd), 1]);
-            }
-          }
-        }
-
-        setError(null);
-        setShowUploadPrompt(false);
-        setLoading(false);
-        setIsFetching(false);
-      } catch (err) {
-        console.error('Error loading data:', err);
-        setError(err.message);
-        setShowUploadPrompt(Boolean(err && err.needsUpload));
-        setLoading(false);
-        setIsFetching(false);
-      }
-    };
-
-    loadData();
-  }, [startTime, endTime, bins, obd, localTraceText]);
-
-  // Keep viewRange within fetched range; if user isn't zoomed (viewRange == previous fetch range),
-  // automatically track the full fetched window.
-  useEffect(() => {
-    const newFetch = { start: Number(startTime), end: Number(endTime) };
-    const prevFetch = fetchRangeRef.current;
-
-    setViewRange((prev) => {
-      const prevStart = Number(prev?.start);
-      const prevEnd = Number(prev?.end);
-      const wasFull = Number.isFinite(prevStart) && Number.isFinite(prevEnd)
-        && prevStart === Number(prevFetch.start)
-        && prevEnd === Number(prevFetch.end);
-
-      if (wasFull) {
-        return { start: newFetch.start, end: newFetch.end };
-      }
-
-      const clampedStart = clampNumber(prevStart, newFetch.start, newFetch.end);
-      const clampedEnd = clampNumber(prevEnd, newFetch.start, newFetch.end);
-      if (clampedEnd <= clampedStart) {
-        return { start: newFetch.start, end: newFetch.end };
-      }
-      return { start: clampedStart, end: clampedEnd };
-    });
-
-    fetchRangeRef.current = newFetch;
-  }, [startTime, endTime]);
-
-  // Drive imperative redraws from viewRange changes (zoom/pan) without refetching.
-  useEffect(() => {
-    viewRangeRef.current = { start: Number(viewRange.start), end: Number(viewRange.end) };
-    if (typeof redrawRef.current === 'function') {
-      redrawRef.current();
-    }
-  }, [viewRange]);
-
-  // Build hierarchical caches: process aggregates and threads grouped by pid/tid/level
-  useEffect(() => {
-    if (!data || data.length === 0 || !obd) {
-      setProcessAggregates(new Map());
-      setThreadsByPid(new Map());
-      return;
-    }
-
-    const windowUs = Math.max(0, Number(endTime) - Number(startTime));
-    const mergeGapUs = windowUs * MERGE_GAP_RATIO;
-    const threadMap = new Map();
-
-    data.forEach((ev) => {
-      const pid = ev.pid ?? 'unknown';
-      const tid = ev.tid ?? pid;
-      const level = Number.isFinite(Number(ev.level)) ? Number(ev.level) : 0;
-      const start = Number(ev.start);
-      const end = Number(ev.end);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
-
-      if (!threadMap.has(pid)) threadMap.set(pid, new Map());
-      const tidMap = threadMap.get(pid);
-      if (!tidMap.has(tid)) tidMap.set(tid, new Map());
-      const levelMap = tidMap.get(tid);
-      if (!levelMap.has(level)) levelMap.set(level, []);
-
-      levelMap.get(level).push({
-        ...ev,
-        pid,
-        tid,
-        level,
-        start,
-        end,
-        count: ev.count ?? 1
-      });
-    });
-
-    // Sort events within each level
-    threadMap.forEach((tidMap) => {
-      tidMap.forEach((levelMap) => {
-        levelMap.forEach((arr) => {
-          arr.sort((a, b) => a.start - b.start);
-        });
-      });
-    });
-
-    // Build process aggregates by merging close/overlapping events across all threads
-    const processMap = new Map();
-    threadMap.forEach((tidMap, pid) => {
-      const all = [];
-      tidMap.forEach((levelMap) => {
-        levelMap.forEach((arr) => all.push(...arr));
-      });
-      all.sort((a, b) => a.start - b.start);
-
-      const merged = [];
-      all.forEach((ev) => {
-        if (merged.length === 0) {
-          merged.push({ ...ev, count: ev.count ?? 1 });
-          return;
-        }
-        const last = merged[merged.length - 1];
-        const gap = ev.start - last.end;
-        if (gap <= mergeGapUs) {
-          last.end = Math.max(last.end, ev.end);
-          last.count = (last.count || 1) + (ev.count || 1);
-        } else {
-          merged.push({ ...ev, count: ev.count ?? 1 });
-        }
-      });
-      processMap.set(pid, merged);
-    });
-
-    setThreadsByPid(threadMap);
-    setProcessAggregates(processMap);
-  }, [data, obd, startTime, endTime]);
-
-  // Drop expanded pids that no longer exist
-  useEffect(() => {
-    setExpandedPids((prev) => prev.filter(pid => threadsByPid.has(pid) || processAggregates.has(pid)));
-  }, [threadsByPid, processAggregates]);
-
   // Render chart with d3 (canvas + svg hybrid for scalability)
-  useEffect(() => {
+  const renderChartEffect = () => {
     if (!chartRef.current) return;
 
     const container = chartRef.current;
@@ -1952,7 +290,7 @@ function App() {
       if (xAxisRef.current) xAxisRef.current.innerHTML = '';
 
       // Handle empty data case
-      if (!data || data.length === 0) {
+      if (!chartData || chartData.length === 0) {
         container.innerHTML = `<div class="chart-empty-state">No data to display</div>`;
         return;
       }
@@ -1976,25 +314,14 @@ function App() {
       const threadGap = layoutConfig?.threadGap ?? 6;
 
       const yAxisConfig = ganttConfig?.yAxis || {};
-      const processOrderRule = normalizeProcessOrderRule(yAxisConfig, processSortMode);
-      const threadOrderMode = resolveThreadLaneMode(yAxisConfig?.threadLaneRule, yAxisConfig?.thread?.orderMode);
       const PROCESS_INDENT_PX = yAxisLayout?.processIndent ?? 16;
 
-      const pids = Array.from(processAggregates.keys());
-      if (pids.length === 0) {
+      const orderedPids = orderResult.orderedPids || [];
+      const depthByPid = orderResult.depthByPid || new Map();
+      if (orderedPids.length === 0) {
         container.innerHTML = `<div class="chart-empty-state">No processes found</div>`;
         return;
       }
-      pids.sort(comparePid);
-
-      const processStats = buildProcessStats(data);
-      const orderResult = applyProcessOrderRule(processOrderRule, {
-        pids,
-        fork: forkRelationsRef.current,
-        processStats
-      });
-      let orderedPids = orderResult.orderedPids;
-      let depthByPid = orderResult.depthByPid;
 
       const processLabelRule = yAxisConfig?.processLabelRule;
       const threadLabelRule = yAxisConfig?.threadLabelRule;
@@ -2143,8 +470,8 @@ function App() {
           }
 
           const levels = Array.from(levelMap.keys())
-            .map(v => (typeof v === 'string' ? Number(v) : v))
-            .filter(v => Number.isFinite(v))
+            .map((v) => (typeof v === 'string' ? Number(v) : v))
+            .filter((v) => Number.isFinite(v))
             .sort((a, b) => a - b);
 
           levels.forEach((level, idx) => {
@@ -2198,7 +525,10 @@ function App() {
         }
 
         const lanes = buildLanesForPid(pid);
-        const lanesHeight = lanes.reduce((sum, lane) => sum + (lane.type === 'gap' ? lane.height : laneHeight), 0);
+        const lanesHeight = lanes.reduce(
+          (sum, lane) => sum + (lane.type === 'gap' ? lane.height : laneHeight),
+          0
+        );
         const blockHeight = headerHeight + expandedPadding + lanesHeight + expandedPadding;
 
         const block = {
@@ -2280,7 +610,8 @@ function App() {
       ctx.scale(pixelRatio, pixelRatio);
 
       // SVG for axes and text
-      const svg = d3.create('svg')
+      const svg = d3
+        .create('svg')
         .attr('class', 'gantt-svg')
         .attr('width', innerWidth + margin.left + margin.right)
         .attr('height', stageHeight)
@@ -2297,7 +628,8 @@ function App() {
       let yAxisGroup = null;
       if (yAxisHost) {
         yAxisHost.innerHTML = '';
-        const axisSvg = d3.create('svg')
+        const axisSvg = d3
+          .create('svg')
           .attr('class', 'gantt-yaxis-svg')
           .attr('width', Y_AXIS_WIDTH)
           .attr('height', stageHeight)
@@ -2321,8 +653,8 @@ function App() {
       const minimapHost = minimapRef.current;
       const axisHost = xAxisRef.current;
       const topWidth = innerWidth + margin.left + margin.right;
-      const minimapHeight = Math.max(60, minimapHost ? (minimapHost.clientHeight || 60) : 60);
-      const axisHeight = Math.max(32, axisHost ? (axisHost.clientHeight || 32) : 32);
+      const minimapHeight = Math.max(60, minimapHost ? minimapHost.clientHeight || 60 : 60);
+      const axisHeight = Math.max(32, axisHost ? axisHost.clientHeight || 32 : 32);
 
       let minimapCtx = null;
       let minimapWindowEl = null;
@@ -2345,113 +677,143 @@ function App() {
         minimapWindowEl = winEl;
 
         // Minimap time ticks overlay (for the full fetched range)
-        const mmAxisSvg = d3.create('svg')
+        const mmAxisSvg = d3
+          .create('svg')
           .attr('width', topWidth)
           .attr('height', minimapHeight)
           .style('width', `${topWidth}px`)
           .style('height', `${minimapHeight}px`)
           .style('overflow', 'visible');
-        minimapAxisGroup = mmAxisSvg.append('g')
+        minimapAxisGroup = mmAxisSvg
+          .append('g')
           .attr('transform', `translate(0, ${minimapHeight - 12})`);
         minimapHost.appendChild(mmAxisSvg.node());
       }
 
       let axisGroup = null;
       if (axisHost) {
-        const axisSvg = d3.create('svg')
+        const axisSvg = d3
+          .create('svg')
           .attr('width', topWidth)
           .attr('height', axisHeight)
           .style('width', `${topWidth}px`)
           .style('height', `${axisHeight}px`)
           .style('overflow', 'visible');
-        axisGroup = axisSvg.append('g')
-          .attr('transform', `translate(0, ${axisHeight - 8})`);
+        axisGroup = axisSvg.append('g').attr('transform', `translate(0, ${axisHeight - 8})`);
         axisHost.appendChild(axisSvg.node());
       }
 
-    // Precompute minimap multi-lane stripes (compressed overview).
-    // We bin events into a small number of lanes based on current track order
-    // so the overview reflects the main Gantt ordering.
-    const overviewBinsCount = Math.min(900, Math.max(300, Math.floor(innerWidth)));
-    const LANE_COUNT = 6;
-    const colorConfig = ganttConfig?.color || GANTT_CONFIG.color;
-    const legacyColorConfig = ganttConfig?.colorMapping || GANTT_CONFIG.colorMapping;
-    const defaultPalette = GANTT_CONFIG.color?.palette || [];
-    const laneDiffs = Array.from({ length: LANE_COUNT }, () => new Array(overviewBinsCount + 1).fill(0));
-    const laneColorCounts = Array.from({ length: LANE_COUNT }, () => new Map());
-    const pidToBlockIndex = new Map();
-    const totalBlocks = Math.max(1, blocks.length);
-    blocks.forEach((block, index) => {
-      pidToBlockIndex.set(block.pid, index);
-    });
-
-    // Use raw events for richer overview (more like trace UI).
-    for (const ev of data) {
-      const s = Number(ev.start);
-      const e = Number(ev.end);
-      if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) continue;
-      const sNorm = (s - fetchStart) / fetchSpan;
-      const eNorm = (e - fetchStart) / fetchSpan;
-      if (eNorm <= 0 || sNorm >= 1) continue;
-      const i0 = Math.max(0, Math.min(overviewBinsCount - 1, Math.floor(sNorm * overviewBinsCount)));
-      const i1 = Math.max(0, Math.min(overviewBinsCount, Math.ceil(eNorm * overviewBinsCount)));
-      const blockIndex = pidToBlockIndex.get(ev.pid);
-      let lane = 0;
-      if (Number.isFinite(blockIndex)) {
-        lane = Math.floor((blockIndex / totalBlocks) * LANE_COUNT);
-      } else {
-        const laneKey = resolveColorKey(ev, ev.tid ?? ev.pid ?? '', {
-          type: 'lane',
-          pid: ev.pid,
-          tid: ev.tid,
-          level: ev.level
-        }, colorConfig, legacyColorConfig);
-        lane = hashStringToInt(laneKey) % LANE_COUNT;
-      }
-      lane = Math.max(0, Math.min(LANE_COUNT - 1, lane));
-      laneDiffs[lane][i0] += 1;
-      laneDiffs[lane][i1] -= 1;
-
-      const trackKey = ev.tid ?? ev.pid ?? '';
-      const color = resolveColor(ev, trackKey, {
-        type: 'lane',
-        pid: ev.pid,
-        tid: ev.tid,
-        level: ev.level
-      }, colorConfig, defaultPalette, legacyColorConfig, processStats);
-      const weight = Math.max(1, i1 - i0);
-      const colorCounts = laneColorCounts[lane];
-      colorCounts.set(color, (colorCounts.get(color) || 0) + weight);
-    }
-
-    const laneColors = new Array(LANE_COUNT).fill(null);
-    for (let lane = 0; lane < LANE_COUNT; lane++) {
-      const colorCounts = laneColorCounts[lane];
-      let bestColor = null;
-      let bestScore = -1;
-      colorCounts.forEach((score, color) => {
-        if (score > bestScore) {
-          bestScore = score;
-          bestColor = color;
-        }
-      });
-      laneColors[lane] = bestColor;
-    }
-
-    const laneBins = Array.from({ length: LANE_COUNT }, () => new Array(overviewBinsCount).fill(0));
-    const laneMax = new Array(LANE_COUNT).fill(0);
-    for (let lane = 0; lane < LANE_COUNT; lane++) {
-      let acc = 0;
-      for (let i = 0; i < overviewBinsCount; i++) {
-        acc += laneDiffs[lane][i];
-        laneBins[lane][i] = acc;
-        laneMax[lane] = Math.max(laneMax[lane], acc);
-      }
-    }
-
-      const colorFor = (item, trackKey, trackMeta) => (
-        resolveColor(item, trackKey, trackMeta, colorConfig, defaultPalette, legacyColorConfig, processStats)
+      // Precompute minimap multi-lane stripes (compressed overview).
+      // We bin events into a small number of lanes based on current track order
+      // so the overview reflects the main Gantt ordering.
+      const overviewBinsCount = Math.min(900, Math.max(300, Math.floor(innerWidth)));
+      const LANE_COUNT = 6;
+      const colorConfig = ganttConfig?.color || GANTT_CONFIG.color;
+      const legacyColorConfig = ganttConfig?.colorMapping || GANTT_CONFIG.colorMapping;
+      const defaultPalette = GANTT_CONFIG.color?.palette || [];
+      const laneDiffs = Array.from({ length: LANE_COUNT }, () =>
+        new Array(overviewBinsCount + 1).fill(0)
       );
+      const laneColorCounts = Array.from({ length: LANE_COUNT }, () => new Map());
+      const pidToBlockIndex = new Map();
+      const totalBlocks = Math.max(1, blocks.length);
+      blocks.forEach((block, index) => {
+        pidToBlockIndex.set(block.pid, index);
+      });
+
+      // Use raw events for richer overview (more like trace UI).
+      for (const ev of chartData) {
+        const s = Number(ev.start);
+        const e = Number(ev.end);
+        if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) continue;
+        const sNorm = (s - fetchStart) / fetchSpan;
+        const eNorm = (e - fetchStart) / fetchSpan;
+        if (eNorm <= 0 || sNorm >= 1) continue;
+        const i0 = Math.max(
+          0,
+          Math.min(overviewBinsCount - 1, Math.floor(sNorm * overviewBinsCount))
+        );
+        const i1 = Math.max(0, Math.min(overviewBinsCount, Math.ceil(eNorm * overviewBinsCount)));
+        const blockIndex = pidToBlockIndex.get(ev.pid);
+        let lane = 0;
+        if (Number.isFinite(blockIndex)) {
+          lane = Math.floor((blockIndex / totalBlocks) * LANE_COUNT);
+        } else {
+          const laneKey = resolveColorKey(
+            ev,
+            ev.tid ?? ev.pid ?? '',
+            {
+              type: 'lane',
+              pid: ev.pid,
+              tid: ev.tid,
+              level: ev.level
+            },
+            colorConfig,
+            legacyColorConfig
+          );
+          lane = hashStringToInt(laneKey) % LANE_COUNT;
+        }
+        lane = Math.max(0, Math.min(LANE_COUNT - 1, lane));
+        laneDiffs[lane][i0] += 1;
+        laneDiffs[lane][i1] -= 1;
+
+        const trackKey = ev.tid ?? ev.pid ?? '';
+        const color = resolveColor(
+          ev,
+          trackKey,
+          {
+            type: 'lane',
+            pid: ev.pid,
+            tid: ev.tid,
+            level: ev.level
+          },
+          colorConfig,
+          defaultPalette,
+          legacyColorConfig,
+          processStats
+        );
+        const weight = Math.max(1, i1 - i0);
+        const colorCounts = laneColorCounts[lane];
+        colorCounts.set(color, (colorCounts.get(color) || 0) + weight);
+      }
+
+      const laneColors = new Array(LANE_COUNT).fill(null);
+      for (let lane = 0; lane < LANE_COUNT; lane++) {
+        const colorCounts = laneColorCounts[lane];
+        let bestColor = null;
+        let bestScore = -1;
+        colorCounts.forEach((score, color) => {
+          if (score > bestScore) {
+            bestScore = score;
+            bestColor = color;
+          }
+        });
+        laneColors[lane] = bestColor;
+      }
+
+      const laneBins = Array.from({ length: LANE_COUNT }, () =>
+        new Array(overviewBinsCount).fill(0)
+      );
+      const laneMax = new Array(LANE_COUNT).fill(0);
+      for (let lane = 0; lane < LANE_COUNT; lane++) {
+        let acc = 0;
+        for (let i = 0; i < overviewBinsCount; i++) {
+          acc += laneDiffs[lane][i];
+          laneBins[lane][i] = acc;
+          laneMax[lane] = Math.max(laneMax[lane], acc);
+        }
+      }
+
+      const colorFor = (item, trackKey, trackMeta) =>
+        resolveColor(
+          item,
+          trackKey,
+          trackMeta,
+          colorConfig,
+          defaultPalette,
+          legacyColorConfig,
+          processStats
+        );
 
       const visibleState = {
         startIndex: 0,
@@ -2461,7 +823,7 @@ function App() {
       };
 
       const drawBars = () => {
-        ctx.clearRect(0, 0, (innerWidth + margin.left + margin.right), stageHeight);
+        ctx.clearRect(0, 0, innerWidth + margin.left + margin.right, stageHeight);
 
         const p = getViewParams();
         const yMin = container.scrollTop;
@@ -2489,7 +851,7 @@ function App() {
 
           // Header background (full width)
           const headerIsHovered = visibleState.hoveredTrack === `proc-${block.pid}`;
-          ctx.fillStyle = block.expanded ? '#eef2ff' : (i % 2 === 0 ? '#fbfbfb' : '#f4f4f4');
+          ctx.fillStyle = block.expanded ? '#eef2ff' : i % 2 === 0 ? '#fbfbfb' : '#f4f4f4';
           ctx.fillRect(0, block.headerY0, margin.left + innerWidth + margin.right, headerHeight);
           if (headerIsHovered) {
             ctx.fillStyle = 'rgba(102, 126, 234, 0.12)';
@@ -2518,7 +880,10 @@ function App() {
               // Only render the portion beyond what's already covered
               const drawX = Math.max(x1, collapsedCoveredEnd);
               if (drawX >= endPx) return; // fully covered
-              ctx.fillStyle = colorFor(item, `proc-${block.pid}`, { type: 'process', pid: block.pid });
+              ctx.fillStyle = colorFor(item, `proc-${block.pid}`, {
+                type: 'process',
+                pid: block.pid
+              });
               ctx.fillRect(drawX, y, endPx - drawX, h);
               collapsedCoveredEnd = endPx;
             });
@@ -2565,7 +930,7 @@ function App() {
 
               events.forEach((ev) => {
                 const tStart = ev.start ?? ev.timeStart ?? 0;
-                const tEnd   = ev.end   ?? ev.timeEnd   ?? 0;
+                const tEnd = ev.end ?? ev.timeEnd ?? 0;
                 const x1Raw = xOf(tStart, p) + blockIndentPx;
                 const x2Raw = xOf(tEnd, p) + blockIndentPx;
                 if (x2Raw < boxX1 || x1Raw > boxX1 + boxW) return;
@@ -2579,7 +944,12 @@ function App() {
                 const drawX = Math.max(x1, coveredEnd);
                 if (drawX >= endPx) return; // fully covered
 
-                const barColor = colorFor(ev, lane.tid, { type: 'lane', pid: block.pid, tid: lane.tid, level: lane.level });
+                const barColor = colorFor(ev, lane.tid, {
+                  type: 'lane',
+                  pid: block.pid,
+                  tid: lane.tid,
+                  level: lane.level
+                });
                 ctx.fillStyle = barColor;
                 ctx.fillRect(drawX, barY, endPx - drawX, barH);
 
@@ -2627,9 +997,10 @@ function App() {
           for (let lane = 0; lane < LANE_COUNT; lane++) {
             const maxV = laneMax[lane] || 1;
             const yBase = 4 + (lane + 1) * laneH;
-            const fallbackPalette = Array.isArray(colorConfig?.palette) && colorConfig.palette.length > 0
-              ? colorConfig.palette
-              : defaultPalette;
+            const fallbackPalette =
+              Array.isArray(colorConfig?.palette) && colorConfig.palette.length > 0
+                ? colorConfig.palette
+                : defaultPalette;
             const color = laneColors[lane] || fallbackPalette[lane % fallbackPalette.length];
             // draw with alpha safely (canvas doesn't accept #RRGGBBAA reliably across browsers)
             minimapCtx.fillStyle = color;
@@ -2656,40 +1027,37 @@ function App() {
         // Minimap ticks for fetched range
         if (minimapAxisGroup) {
           const tickCount = Math.max(4, Math.floor(innerWidth / 160));
-          const scale = d3.scaleLinear()
+          const scale = d3
+            .scaleLinear()
             .domain([fetchStart, fetchEnd])
             .range([margin.left, margin.left + innerWidth]);
           minimapAxisGroup.call(
-            d3.axisBottom(scale)
+            d3
+              .axisBottom(scale)
               .ticks(tickCount)
               .tickFormat((d) => formatTimeUs(d))
           );
-          minimapAxisGroup.selectAll('text')
-            .style('font-size', '10px')
-            .style('fill', '#6b7280');
-          minimapAxisGroup.selectAll('path,line')
-            .style('stroke', '#d1d5db');
+          minimapAxisGroup.selectAll('text').style('font-size', '10px').style('fill', '#6b7280');
+          minimapAxisGroup.selectAll('path,line').style('stroke', '#d1d5db');
         }
 
         // Fixed x-axis (zoom target)
         if (axisGroup) {
           const tickCount = Math.max(4, Math.floor(innerWidth / 140));
-          const scale = d3.scaleLinear()
+          const scale = d3
+            .scaleLinear()
             .domain([p.vs, p.ve])
             .range([margin.left, margin.left + innerWidth]);
           axisGroup.call(
-            d3.axisBottom(scale)
+            d3
+              .axisBottom(scale)
               .ticks(tickCount)
               .tickFormat((d) => formatTimeUs(d))
           );
-          axisGroup.selectAll('text')
-            .style('font-size', '12px')
-            .style('fill', '#555');
-          axisGroup.selectAll('path,line')
-            .style('stroke', '#d0d0d0');
+          axisGroup.selectAll('text').style('font-size', '12px').style('fill', '#555');
+          axisGroup.selectAll('path,line').style('stroke', '#d0d0d0');
           // Ensure labels stay inside visible area
-          axisGroup.selectAll('text')
-            .attr('dy', '1.2em');
+          axisGroup.selectAll('text').attr('dy', '1.2em');
         }
       };
 
@@ -2735,7 +1103,7 @@ function App() {
               key: `bg-proc-${block.pid}`,
               y: block.headerY0 - scrollY,
               h: headerHeight,
-              fill: (i % 2 === 0 ? '#fbfbfb' : '#f4f4f4')
+              fill: i % 2 === 0 ? '#fbfbfb' : '#f4f4f4'
             });
           }
 
@@ -2772,27 +1140,29 @@ function App() {
           }
         }
 
-        yAxisGroup.selectAll('rect.y-bg')
-          .data(bgRects, d => d.key)
+        yAxisGroup
+          .selectAll('rect.y-bg')
+          .data(bgRects, (d) => d.key)
           .join('rect')
           .attr('class', 'y-bg')
           .attr('x', 0)
-          .attr('y', d => d.y)
+          .attr('y', (d) => d.y)
           .attr('width', Y_AXIS_WIDTH)
-          .attr('height', d => d.h)
-          .attr('fill', d => d.fill);
+          .attr('height', (d) => d.h)
+          .attr('fill', (d) => d.fill);
 
-        yAxisGroup.selectAll('text')
-          .data(labels, d => d.key)
+        yAxisGroup
+          .selectAll('text')
+          .data(labels, (d) => d.key)
           .join('text')
-          .attr('x', d => d.x + (d.indent || 0))
-          .attr('y', d => d.y)
+          .attr('x', (d) => d.x + (d.indent || 0))
+          .attr('y', (d) => d.y)
           .attr('text-anchor', 'start')
           .attr('dominant-baseline', 'middle')
           .attr('fill', '#333')
-          .style('font-size', d => `${d.fontSize || 12}px`)
-          .style('font-weight', d => d.fontWeight || 500)
-          .text(d => d.text);
+          .style('font-size', (d) => `${d.fontSize || 12}px`)
+          .style('font-weight', (d) => d.fontWeight || 500)
+          .text((d) => d.text);
       };
 
       const updateVisibleWindow = () => {
@@ -2858,7 +1228,7 @@ function App() {
           return { area: 'header', block, lane: null, item: null };
         }
 
-        const lane = block.lanes.find(l => l.type === 'lane' && y >= l.y0 && y <= l.y1);
+        const lane = block.lanes.find((l) => l.type === 'lane' && y >= l.y0 && y <= l.y1);
         if (!lane) return { area: 'lane', block, lane: null, item: null };
 
         const events = lane.events || [];
@@ -2876,53 +1246,67 @@ function App() {
         return { area: 'lane', block, lane, item: null };
       };
 
+      let hoverFrame = 0;
+      let lastHover = null;
       const handleMouseMove = (e) => {
-        const rect = container.getBoundingClientRect();
-        const x = e.clientX - rect.left + container.scrollLeft;
-        const y = e.clientY - rect.top + container.scrollTop;
-        const hit = findItemAtPosition(x, y);
-        visibleState.hoveredTrack = hit ? `proc-${hit.block.pid}` : null;
-        visibleState.hoveredItem = hit ? hit.item : null;
-        redraw();
+        lastHover = { clientX: e.clientX, clientY: e.clientY };
+        if (hoverFrame) return;
+        hoverFrame = requestAnimationFrame(() => {
+          hoverFrame = 0;
+          if (!lastHover) return;
+          const rect = container.getBoundingClientRect();
+          const x = lastHover.clientX - rect.left + container.scrollLeft;
+          const y = lastHover.clientY - rect.top + container.scrollTop;
+          const hit = findItemAtPosition(x, y);
+          visibleState.hoveredTrack = hit ? `proc-${hit.block.pid}` : null;
+          visibleState.hoveredItem = hit ? hit.item : null;
+          redraw();
 
-        if (hit && hit.item) {
-          const tooltipConfig = ganttConfig?.tooltip || GANTT_CONFIG.tooltip;
-          if (tooltipConfig?.enabled === false) {
+          if (hit && hit.item) {
+            const tooltipConfig = ganttConfig?.tooltip || GANTT_CONFIG.tooltip;
+            if (tooltipConfig?.enabled === false) {
+              tooltip.style.display = 'none';
+              return;
+            }
+            tooltip.style.display = 'block';
+            tooltip.style.left = `${lastHover.clientX + 12}px`;
+            tooltip.style.top = `${lastHover.clientY + 12}px`;
+            const item = hit.item;
+            const pid = item.pid ?? hit.block.pid ?? '';
+            const tid = item.tid ?? hit.lane?.tid ?? '';
+            const startUs = Number(item.start ?? item.timeStart);
+            const endUs = Number(item.end ?? item.timeEnd);
+            const durationUs =
+              Number.isFinite(startUs) && Number.isFinite(endUs) ? Math.max(0, endUs - startUs) : 0;
+            const sqlId = item.id ?? null;
+
+            const stats = processStats.get(String(pid)) || {};
+            const tooltipHtml = buildTooltipHtml(hit, tooltipConfig, {
+              event: item,
+              block: hit.block,
+              lane: hit.lane,
+              pid,
+              tid: String(tid ?? ''),
+              startUs,
+              endUs,
+              durationUs,
+              sqlId,
+              stats,
+              vars: { pid, tid, startUs, endUs, durationUs, sqlId }
+            });
+            tooltip.innerHTML = tooltipHtml;
+          } else {
             tooltip.style.display = 'none';
-            return;
           }
-          tooltip.style.display = 'block';
-          tooltip.style.left = `${e.clientX + 12}px`;
-          tooltip.style.top = `${e.clientY + 12}px`;
-          const item = hit.item;
-          const pid = item.pid ?? hit.block.pid ?? '';
-          const tid = item.tid ?? hit.lane?.tid ?? '';
-          const startUs = Number(item.start ?? item.timeStart);
-          const endUs = Number(item.end ?? item.timeEnd);
-          const durationUs = Number.isFinite(startUs) && Number.isFinite(endUs) ? Math.max(0, endUs - startUs) : 0;
-          const sqlId = item.id ?? null;
-
-          const stats = processStats.get(String(pid)) || {};
-          const tooltipHtml = buildTooltipHtml(hit, tooltipConfig, {
-            event: item,
-            block: hit.block,
-            lane: hit.lane,
-            pid,
-            tid: String(tid ?? ''),
-            startUs,
-            endUs,
-            durationUs,
-            sqlId,
-            stats,
-            vars: { pid, tid, startUs, endUs, durationUs, sqlId }
-          });
-          tooltip.innerHTML = tooltipHtml;
-        } else {
-          tooltip.style.display = 'none';
-        }
+        });
       };
 
       const handleMouseLeave = () => {
+        lastHover = null;
+        if (hoverFrame) {
+          cancelAnimationFrame(hoverFrame);
+          hoverFrame = 0;
+        }
         visibleState.hoveredTrack = null;
         visibleState.hoveredItem = null;
         tooltip.style.display = 'none';
@@ -2946,7 +1330,7 @@ function App() {
         const pid = block.pid;
         setExpandedPids((prev) => {
           const has = prev.includes(pid);
-          if (has) return prev.filter(p => p !== pid);
+          if (has) return prev.filter((p) => p !== pid);
           return [...prev, pid];
         });
         // keep scroll position
@@ -2961,7 +1345,7 @@ function App() {
         const pid = block.pid;
         setExpandedPids((prev) => {
           const has = prev.includes(pid);
-          if (has) return prev.filter(p => p !== pid);
+          if (has) return prev.filter((p) => p !== pid);
           return [...prev, pid];
         });
       };
@@ -2991,7 +1375,7 @@ function App() {
           const newSpan = clampNumber(span * zoomFactor, minSpan, fetchSpan);
 
           const t = prevStart + ((xViewport - margin.left) / innerWidth) * span;
-          let newStart = t - ((t - prevStart) * (newSpan / span));
+          let newStart = t - (t - prevStart) * (newSpan / span);
           let newEnd = newStart + newSpan;
 
           if (newStart < fetchStart) {
@@ -3031,7 +1415,7 @@ function App() {
           const newSpan = clampNumber(span * zoomFactor, minSpan, fetchSpan);
 
           const t = prevStart + ((xInChart - margin.left) / innerWidth) * span;
-          let newStart = t - ((t - prevStart) * (newSpan / span));
+          let newStart = t - (t - prevStart) * (newSpan / span);
           let newEnd = newStart + newSpan;
 
           if (newStart < fetchStart) {
@@ -3178,6 +1562,10 @@ function App() {
       }
 
       return () => {
+        if (hoverFrame) {
+          cancelAnimationFrame(hoverFrame);
+          hoverFrame = 0;
+        }
         container.removeEventListener('scroll', redraw);
         container.removeEventListener('mousemove', handleMouseMove);
         container.removeEventListener('mouseleave', handleMouseLeave);
@@ -3222,7 +1610,21 @@ function App() {
       if (xAxisRef.current) xAxisRef.current.innerHTML = '';
       if (yAxisRef.current) yAxisRef.current.innerHTML = '';
     };
-  }, [data, startTime, endTime, bins, obd, processAggregates, threadsByPid, expandedPids, yAxisWidth, processSortMode, ganttConfig]);
+  };
+
+  useGanttChart(renderChartEffect, [
+    chartData,
+    startTime,
+    endTime,
+    bins,
+    obd,
+    processAggregates,
+    threadsByPid,
+    expandedPids,
+    yAxisWidth,
+    processSortMode,
+    ganttConfig
+  ]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -3251,383 +1653,8 @@ function App() {
     }
   }, [configHighlightId]);
 
-  // Handle sending messages to LLM
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isStreaming) return;
-
-    // Create user message with optional image
-    let userMessage = { role: 'user', content: inputMessage };
-    
-    // If an image is selected, include it in the message
-    // Note: This requires a vision-capable LLM API (e.g., GPT-4 Vision, Claude 3)
-    // You would need to modify streamLLMResponse in llmConfig.js to support multimodal content
-    if (selectedImageId) {
-      const selectedImage = savedImages.find(img => img.id === selectedImageId);
-      if (selectedImage) {
-        userMessage.imageData = selectedImage.dataUrl;
-        // For vision models, the content format would be:
-        // content: [
-        //   { type: 'text', text: inputMessage },
-        //   { type: 'image_url', image_url: { url: selectedImage.dataUrl } }
-        // ]
-        console.log('Image attached to message:', selectedImageId);
-      }
-    }
-
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
-    setInputMessage('');
-    setIsStreaming(true);
-    setCurrentStreamingMessage('');
-
-    // Prepare enhanced context about the current chart data for tracks configuration
-    const uniqueTracks = [...new Set(data.map(d => d.pid ?? d.tid ?? d.track))];
-    const configSummary = [
-      `yAxis.processOrderRule=${ganttConfig?.yAxis?.processOrderRule?.name || 'pidAsc'}`,
-      `yAxis.threadLaneRule=${ganttConfig?.yAxis?.threadLaneRule?.name || 'autoPack'}`,
-      `color.keyRule=${ganttConfig?.color?.keyRule ? 'rule' : 'default'}`,
-      `color.palette=${(ganttConfig?.color?.palette || []).length}`,
-      `tooltip=${ganttConfig?.tooltip?.enabled === false ? 'off' : 'on'}`
-    ].join(', ');
-    const activeConfigContext = activeConfigItem
-      ? {
-          id: activeConfigItem.id,
-          label: activeConfigItem.label,
-          path: activeConfigItem.path,
-          description: activeConfigItem.description,
-          example: activeConfigItem.example,
-          currentValue: getValueAtPath(ganttConfig, activeConfigItem.path)
-        }
-      : null;
-    const chartContext = {
-      totalTracks: uniqueTracks.length,
-      trackNames: uniqueTracks.sort(),
-      timeRange: data.length > 0 
-        ? `${formatTimeUs(startTime)} to ${formatTimeUs(endTime)}`
-        : 'unknown',
-      dataPointCount: data.length,
-      configSummary,
-      activeConfigItem: activeConfigContext
-    };
-
-    // Use widget agent mode toggle instead of regex detection
-    const eventFields = extractEventFieldPaths(data, 80);
-    const sampleEvents = Array.isArray(data) ? data.slice(0, 5) : [];
-    console.log('[Config Agent] Event fields extracted:', eventFields);
-    console.log('[Config Agent] Sample events:', sampleEvents.length);
-    console.log('[Agent Mode] Widget agent mode:', isWidgetAgentMode);
-    const enhancedSystemPrompt = isWidgetAgentMode
-      ? getWidgetSystemPrompt(chartContext, widgetConfig, widgets, {
-          dataSchema,
-          fieldMapping,
-          eventFields,
-          sampleEvents
-        })
-      : buildSystemPrompt({
-          schema: dataSchema,
-          currentConfig: ganttConfig,
-          activeConfigItem: activeConfigContext,
-          eventFields,
-          sampleEvents,
-          fieldMapping
-        });
-
-    const contextualMessages = [
-      { role: 'system', content: enhancedSystemPrompt },
-      ...newMessages
-    ];
-
-    // Use a ref to accumulate the streaming message
-    let accumulatedMessage = '';
-
-    try {
-      await streamLLMResponse(
-        contextualMessages,
-        (chunk) => {
-          accumulatedMessage += chunk;
-          setCurrentStreamingMessage(accumulatedMessage);
-        },
-        () => {
-          // Streaming complete - process the response
-          setMessages(prev => [
-            ...prev,
-            { role: 'assistant', content: accumulatedMessage }
-          ]);
-          setCurrentStreamingMessage('');
-          setIsStreaming(false);
-
-          // Check if the response contains a configuration update
-          const configResponse = parseTrackConfigFromResponse(accumulatedMessage);
-          if (configResponse?.action === 'clarification_needed') {
-            const question = configResponse.question || 'Could you clarify the requested configuration?';
-            const suggestions = Array.isArray(configResponse.suggestions)
-              ? ` Suggestions: ${configResponse.suggestions.join(', ')}`
-              : '';
-            setMessages(prev => [
-              ...prev,
-              {
-                role: 'system',
-                content: `Question: ${question}${suggestions}`
-              }
-            ]);
-          } else if (configResponse?.action === 'update_gantt_config') {
-            try {
-              let patchToApply = configResponse.patch;
-              if (activeConfigItem?.path) {
-                const nextValue = getValueAtPath(configResponse.patch, activeConfigItem.path);
-                if (nextValue === undefined) {
-                  setMessages(prev => [
-                    ...prev,
-                    {
-                      role: 'system',
-                      content: `⚠️ No update applied. The assistant must update only: ${activeConfigItem.path}`
-                    }
-                  ]);
-                  return;
-                }
-                patchToApply = buildPatchForPath(activeConfigItem.path, nextValue);
-              }
-              const nextConfig = applyGanttConfigPatch(ganttConfig, patchToApply);
-              setGanttConfig(nextConfig);
-              if (patchToApply?.yAxis?.processOrderRule) {
-                setProcessSortMode(
-                  inferProcessSortModeFromRule(patchToApply.yAxis.processOrderRule)
-                );
-              } else if (patchToApply?.yAxis?.orderMode) {
-                const nextMode = patchToApply.yAxis.orderMode;
-                setProcessSortMode(nextMode === 'fork' ? 'fork' : 'default');
-              }
-              // Use extractTargetPath to find which config item was modified
-              const targetPath = configResponse.targetPath || extractTargetPath(patchToApply);
-              const matchedItem = targetPath 
-                ? FLAT_CONFIG_ITEMS.find(item => item.path === targetPath) || findConfigItemForPatch(patchToApply)
-                : (activeConfigItem?.path && getValueAtPath(patchToApply, activeConfigItem.path) !== undefined
-                    ? activeConfigItem
-                    : findConfigItemForPatch(patchToApply));
-              if (matchedItem) {
-                handleOpenConfigEditor(matchedItem, {
-                  configOverride: nextConfig,
-                  highlight: true
-                });
-              }
-              setMessages(prev => [
-                ...prev,
-                {
-                  role: 'system',
-                  content: `✅ Gantt config updated: ${configResponse.description || 'Configuration updated successfully'}`
-                }
-              ]);
-            } catch (error) {
-              console.error('Error applying gantt config update:', error);
-              setMessages(prev => [
-                ...prev,
-                {
-                  role: 'system',
-                  content: `⚠️ Could not apply gantt config update: ${error.message}`
-                }
-              ]);
-            }
-          } else if (configResponse?.action === 'configure_tracks') {
-            console.log('Track configuration detected:', configResponse);
-
-            // Convert LLM config to internal format and apply it
-            try {
-              const internalConfig = convertLLMConfigToTracksConfig(configResponse, data);
-              if (internalConfig) {
-                setTracksConfig(internalConfig);
-              }
-
-              // Add a confirmation message to chat
-              setMessages(prev => [
-                ...prev,
-                {
-                  role: 'system',
-                  content: `✅ Track configuration applied: ${configResponse.config.description || 'Configuration updated successfully'}`
-                }
-              ]);
-            } catch (error) {
-              console.error('Error applying track configuration:', error);
-              setMessages(prev => [
-                ...prev,
-                {
-                  role: 'system',
-                  content: `⚠️ Could not apply track configuration: ${error.message}`
-                }
-              ]);
-            }
-          } else if (configResponse?.action === 'create_widget') {
-            try {
-              const rawWidget = normalizeWidget(configResponse.widget);
-              
-              // Validate and auto-fix the widget
-              const validation = validateWidget(rawWidget, widgets);
-              
-              if (!validation.valid) {
-                console.error('Widget validation errors:', validation.errors);
-                throw new Error(validation.errors.join('; '));
-              }
-              
-              const nextWidget = validation.widget;
-              
-              // Log any fixes or warnings
-              if (validation.fixes.length > 0) {
-                console.log('[Widget Validator] Auto-fixes applied:', validation.fixes);
-              }
-              if (validation.warnings.length > 0) {
-                console.warn('[Widget Validator] Warnings:', validation.warnings);
-              }
-              
-              if (!nextWidget.html) {
-                throw new Error('Widget HTML is empty.');
-              }
-              
-              setWidgets(prev => [...prev, nextWidget]);
-              // Auto-open the widget editor for the newly created widget
-              handleOpenWidgetEditor(nextWidget, { highlight: true });
-              
-              // Build message with any fixes/warnings
-              let statusMsg = `✅ Widget added: ${nextWidget.name}`;
-              if (validation.fixes.length > 0) {
-                statusMsg += `\n(Auto-fixes: ${validation.fixes.join(', ')})`;
-              }
-              if (validation.warnings.length > 0) {
-                statusMsg += `\n⚠️ Warnings: ${validation.warnings.join(', ')}`;
-              }
-              
-              setMessages(prev => [
-                ...prev,
-                {
-                  role: 'system',
-                  content: statusMsg
-                }
-              ]);
-            } catch (error) {
-              console.error('Error creating widget:', error);
-              setMessages(prev => [
-                ...prev,
-                {
-                  role: 'system',
-                  content: `⚠️ Could not create widget: ${error.message}`
-                }
-              ]);
-            }
-          } else if (configResponse?.action === 'update_widget') {
-            try {
-              const rawWidget = normalizeWidget(configResponse.widget);
-              
-              // Validate the widget (exclude current widget from conflict check)
-              const otherWidgets = widgets.filter(w => w.id !== rawWidget.id);
-              const validation = validateWidget(rawWidget, otherWidgets);
-              
-              if (!validation.valid) {
-                console.error('Widget validation errors:', validation.errors);
-                throw new Error(validation.errors.join('; '));
-              }
-              
-              const nextWidget = validation.widget;
-              
-              // Log any fixes or warnings
-              if (validation.fixes.length > 0) {
-                console.log('[Widget Validator] Auto-fixes applied:', validation.fixes);
-              }
-              if (validation.warnings.length > 0) {
-                console.warn('[Widget Validator] Warnings:', validation.warnings);
-              }
-              
-              setWidgets(prev => {
-                const index = prev.findIndex(item => item.id === rawWidget.id);
-                if (index === -1) {
-                  throw new Error(`Widget not found: ${rawWidget.id}`);
-                }
-                const updated = [...prev];
-                const existing = updated[index];
-                updated[index] = {
-                  ...existing,
-                  ...nextWidget,
-                  html: nextWidget.html || existing.html,
-                  listeners: nextWidget.listeners.length > 0 ? nextWidget.listeners : existing.listeners
-                };
-                return updated;
-              });
-              
-              // Build message with any fixes/warnings
-              let statusMsg = `✅ Widget updated: ${nextWidget.name}`;
-              if (validation.fixes.length > 0) {
-                statusMsg += `\n(Auto-fixes: ${validation.fixes.join(', ')})`;
-              }
-              if (validation.warnings.length > 0) {
-                statusMsg += `\n⚠️ Warnings: ${validation.warnings.join(', ')}`;
-              }
-              
-              setMessages(prev => [
-                ...prev,
-                {
-                  role: 'system',
-                  content: statusMsg
-                }
-              ]);
-            } catch (error) {
-              console.error('Error updating widget:', error);
-              setMessages(prev => [
-                ...prev,
-                {
-                  role: 'system',
-                  content: `⚠️ Could not update widget: ${error.message}`
-                }
-              ]);
-            }
-          } else if (configResponse?.action === 'update_widget_config') {
-            try {
-              const nextConfig = applyWidgetConfigPatch(widgetConfig, configResponse.patch);
-              setWidgetConfig(nextConfig);
-              setMessages(prev => [
-                ...prev,
-                {
-                  role: 'system',
-                  content: `✅ Widget layout/style updated: ${configResponse.description || 'Widget config updated successfully'}`
-                }
-              ]);
-            } catch (error) {
-              console.error('Error applying widget config update:', error);
-              setMessages(prev => [
-                ...prev,
-                {
-                  role: 'system',
-                  content: `⚠️ Could not update widget layout/style: ${error.message}`
-                }
-              ]);
-            }
-          }
-        },
-        (error) => {
-          console.error('Streaming error:', error);
-          setMessages(prev => [
-            ...prev,
-            { role: 'assistant', content: `Error: ${error.message}. Please check your LLM API configuration.` }
-          ]);
-          setCurrentStreamingMessage('');
-          setIsStreaming(false);
-        }
-      );
-    } catch (error) {
-      console.error('Error sending message:', error);
-      setMessages(prev => [
-        ...prev,
-        { role: 'assistant', content: `Error: ${error.message}. Please check your LLM API configuration.` }
-      ]);
-      setIsStreaming(false);
-    }
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
   // Handle capture of annotated chart for LLM
-  const handleCaptureImage = async () => {
+  const handleCaptureImage = useCallback(async () => {
     if (drawingOverlayRef.current) {
       const blob = await drawingOverlayRef.current.exportAnnotatedImage();
       if (blob) {
@@ -3636,87 +1663,104 @@ function App() {
           reader.onloadend = () => resolve(reader.result);
           reader.readAsDataURL(blob);
         });
-        
+
         const newImage = {
           id: `img-${Date.now()}`,
           dataUrl,
           timestamp: new Date().toISOString(),
           size: blob.size
         };
-        
-        setSavedImages(prev => [...prev, newImage]);
+
+        setSavedImages((prev) => [...prev, newImage]);
         setSelectedImageId(newImage.id);
-        
+
         // Show success message in chat
-        setMessages(prev => [
+        setMessages((prev) => [
           ...prev,
-          { role: 'assistant', content: '📸 Chart captured successfully! The image is ready to send to the LLM.' }
+          {
+            role: 'assistant',
+            content: '📸 Chart captured successfully! The image is ready to send to the LLM.'
+          }
         ]);
       }
     }
-  };
-  
+  }, [setMessages, setSavedImages, setSelectedImageId]);
+
   // Delete an image from saved images
-  const handleDeleteImage = (imageId) => {
-    setSavedImages(prev => prev.filter(img => img.id !== imageId));
-    if (selectedImageId === imageId) {
-      setSelectedImageId(null);
-    }
-  };
-  
+  const handleDeleteImage = useCallback(
+    (imageId) => {
+      setSavedImages((prev) => prev.filter((img) => img.id !== imageId));
+      if (selectedImageId === imageId) {
+        setSelectedImageId(null);
+      }
+    },
+    [selectedImageId, setSavedImages, setSelectedImageId]
+  );
+
   // Select/deselect an image
-  const handleSelectImage = (imageId) => {
-    setSelectedImageId(prev => prev === imageId ? null : imageId);
-  };
+  const handleSelectImage = useCallback(
+    (imageId) => {
+      setSelectedImageId((prev) => (prev === imageId ? null : imageId));
+    },
+    [setSelectedImageId]
+  );
 
   // Handle clear drawings
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     if (drawingOverlayRef.current) {
       drawingOverlayRef.current.clearCanvas();
     }
-  };
+  }, []);
 
-  const clearConfigHighlight = () => {
+  const clearConfigHighlight = useCallback(() => {
     if (configHighlightTimeoutRef.current) {
       clearTimeout(configHighlightTimeoutRef.current);
       configHighlightTimeoutRef.current = null;
     }
     setConfigHighlightId(null);
-  };
+  }, [setConfigHighlightId]);
 
-  const handleOpenConfigEditor = (item, options = {}) => {
-    if (!item) return;
-    const { configOverride, highlight = false } = options;
-    const sourceConfig = configOverride || ganttConfig;
-    const currentValue = getValueAtPath(sourceConfig, item.path);
-    const serialized = currentValue === undefined
-      ? ''
-      : JSON.stringify(currentValue, null, 2);
-    setActiveConfigItem(item);
-    setConfigEditorText(serialized);
-    setConfigEditorError('');
-    if (highlight) {
-      setConfigHighlightId(item.id);
-      if (configHighlightTimeoutRef.current) {
-        clearTimeout(configHighlightTimeoutRef.current);
+  const handleOpenConfigEditor = useCallback(
+    (item, options = {}) => {
+      if (!item) return;
+      const { configOverride, highlight = false } = options;
+      const sourceConfig = configOverride || ganttConfig;
+      const currentValue = getValueAtPath(sourceConfig, item.path);
+      const serialized = currentValue === undefined ? '' : JSON.stringify(currentValue, null, 2);
+      setActiveConfigItem(item);
+      setConfigEditorText(serialized);
+      setConfigEditorError('');
+      if (highlight) {
+        setConfigHighlightId(item.id);
+        if (configHighlightTimeoutRef.current) {
+          clearTimeout(configHighlightTimeoutRef.current);
+        }
+        configHighlightTimeoutRef.current = setTimeout(() => {
+          setConfigHighlightId(null);
+          configHighlightTimeoutRef.current = null;
+        }, 3500);
+      } else {
+        clearConfigHighlight();
       }
-      configHighlightTimeoutRef.current = setTimeout(() => {
-        setConfigHighlightId(null);
-        configHighlightTimeoutRef.current = null;
-      }, 3500);
-    } else {
-      clearConfigHighlight();
-    }
-  };
+    },
+    [
+      clearConfigHighlight,
+      ganttConfig,
+      setActiveConfigItem,
+      setConfigEditorError,
+      setConfigEditorText,
+      setConfigHighlightId
+    ]
+  );
 
-  const handleCloseConfigEditor = () => {
+  const handleCloseConfigEditor = useCallback(() => {
     clearConfigHighlight();
     setActiveConfigItem(null);
     setConfigEditorText('');
     setConfigEditorError('');
-  };
+  }, [clearConfigHighlight, setActiveConfigItem, setConfigEditorError, setConfigEditorText]);
 
-  const handleSaveConfigEditor = () => {
+  const handleSaveConfigEditor = useCallback(() => {
     if (!activeConfigItem) return;
     try {
       const parsed = configEditorText ? JSON.parse(configEditorText) : null;
@@ -3742,52 +1786,104 @@ function App() {
       setConfigEditorError(`Invalid JSON: ${error.message}`);
       return;
     }
-  };
+  }, [
+    activeConfigItem,
+    clearConfigHighlight,
+    configEditorText,
+    ganttConfig,
+    handleCloseConfigEditor,
+    setConfigEditorError,
+    setGanttConfig,
+    setMessages,
+    setProcessSortMode
+  ]);
 
   // Widget editor handlers
-  const clearWidgetHighlight = () => {
+  const clearWidgetHighlight = useCallback(() => {
     if (widgetHighlightTimeoutRef.current) {
       clearTimeout(widgetHighlightTimeoutRef.current);
       widgetHighlightTimeoutRef.current = null;
     }
     setWidgetHighlightId(null);
-  };
+  }, [setWidgetHighlightId]);
 
-  const handleOpenWidgetEditor = (widget, options = {}) => {
-    if (!widget) return;
-    const { highlight = false } = options;
-    const serialized = JSON.stringify({
-      id: widget.id,
-      name: widget.name,
-      html: widget.html,
-      listeners: widget.listeners,
-      description: widget.description
-    }, null, 2);
-    setActiveWidget(widget);
-    setWidgetEditorText(serialized);
-    setWidgetEditorError('');
-    if (highlight) {
-      setWidgetHighlightId(widget.id);
-      if (widgetHighlightTimeoutRef.current) {
-        clearTimeout(widgetHighlightTimeoutRef.current);
+  const handleOpenWidgetEditor = useCallback(
+    (widget, options = {}) => {
+      if (!widget) return;
+      const { highlight = false } = options;
+      const serialized = JSON.stringify(
+        {
+          id: widget.id,
+          name: widget.name,
+          html: widget.html,
+          listeners: widget.listeners,
+          description: widget.description
+        },
+        null,
+        2
+      );
+      setActiveWidget(widget);
+      setWidgetEditorText(serialized);
+      setWidgetEditorError('');
+      if (highlight) {
+        setWidgetHighlightId(widget.id);
+        if (widgetHighlightTimeoutRef.current) {
+          clearTimeout(widgetHighlightTimeoutRef.current);
+        }
+        widgetHighlightTimeoutRef.current = setTimeout(() => {
+          setWidgetHighlightId(null);
+          widgetHighlightTimeoutRef.current = null;
+        }, 3500);
+      } else {
+        clearWidgetHighlight();
       }
-      widgetHighlightTimeoutRef.current = setTimeout(() => {
-        setWidgetHighlightId(null);
-        widgetHighlightTimeoutRef.current = null;
-      }, 3500);
-    } else {
-      clearWidgetHighlight();
-    }
-  };
+    },
+    [
+      clearWidgetHighlight,
+      setActiveWidget,
+      setWidgetEditorError,
+      setWidgetEditorText,
+      setWidgetHighlightId
+    ]
+  );
 
-  const handleCloseWidgetEditor = () => {
+  const { handleSendMessage, handleKeyPress } = useChatAgent({
+    inputMessage,
+    isStreaming,
+    selectedImageId,
+    savedImages,
+    messages,
+    data,
+    ganttConfig,
+    startTime,
+    endTime,
+    activeConfigItem,
+    dataSchema,
+    fieldMapping,
+    isWidgetAgentMode,
+    widgetConfig,
+    widgets,
+    setMessages,
+    setInputMessage,
+    setIsStreaming,
+    setCurrentStreamingMessage,
+    setGanttConfig,
+    setProcessSortMode,
+    setTracksConfig,
+    setWidgets,
+    setWidgetConfig,
+    handleOpenConfigEditor,
+    handleOpenWidgetEditor
+  });
+
+  const handleCloseWidgetEditor = useCallback(() => {
     clearWidgetHighlight();
     setActiveWidget(null);
     setWidgetEditorText('');
     setWidgetEditorError('');
-  };
+  }, [clearWidgetHighlight, setActiveWidget, setWidgetEditorError, setWidgetEditorText]);
 
-  const handleSaveWidgetEditor = () => {
+  const handleSaveWidgetEditor = useCallback(() => {
     if (!activeWidget) return;
     try {
       const parsed = widgetEditorText ? JSON.parse(widgetEditorText) : null;
@@ -3795,8 +1891,8 @@ function App() {
         throw new Error('Widget must have an id.');
       }
       const updatedWidget = normalizeWidget(parsed);
-      setWidgets(prev => {
-        const index = prev.findIndex(w => w.id === activeWidget.id);
+      setWidgets((prev) => {
+        const index = prev.findIndex((w) => w.id === activeWidget.id);
         if (index === -1) {
           // New widget - shouldn't happen via editor, but handle gracefully
           return [...prev, updatedWidget];
@@ -3819,21 +1915,32 @@ function App() {
       setWidgetEditorError(`Invalid JSON: ${error.message}`);
       return;
     }
-  };
+  }, [
+    activeWidget,
+    clearWidgetHighlight,
+    handleCloseWidgetEditor,
+    setMessages,
+    setWidgetEditorError,
+    setWidgets,
+    widgetEditorText
+  ]);
 
-  const handleDeleteWidget = (widgetId) => {
-    setWidgets(prev => prev.filter(w => w.id !== widgetId));
-    if (activeWidget?.id === widgetId) {
-      handleCloseWidgetEditor();
-    }
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: 'system',
-        content: `🗑️ Widget deleted`
+  const handleDeleteWidget = useCallback(
+    (widgetId) => {
+      setWidgets((prev) => prev.filter((w) => w.id !== widgetId));
+      if (activeWidget?.id === widgetId) {
+        handleCloseWidgetEditor();
       }
-    ]);
-  };
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'system',
+          content: `🗑️ Widget deleted`
+        }
+      ]);
+    },
+    [activeWidget, handleCloseWidgetEditor, setMessages, setWidgets]
+  );
 
   if (loading && (!data || data.length === 0)) {
     return (
@@ -3847,17 +1954,21 @@ function App() {
     return (
       <div className="App">
         <div className="error">
-          <div style={{
-            backgroundColor: '#fee',
-            border: '1px solid #fcc',
-            padding: '15px',
-            borderRadius: '4px',
-            color: '#c33',
-            textAlign: 'center',
-            fontFamily: 'system-ui'
-          }}>
-            Error loading data: {error}<br/>
-            Start the API server at {API_URL}, place {FRONTEND_TRACE_LABEL} in the public folder, or upload a trace file.
+          <div
+            style={{
+              backgroundColor: '#fee',
+              border: '1px solid #fcc',
+              padding: '15px',
+              borderRadius: '4px',
+              color: '#c33',
+              textAlign: 'center',
+              fontFamily: 'system-ui'
+            }}
+          >
+            Error loading data: {error}
+            <br />
+            Start the API server at {API_URL}, place {FRONTEND_TRACE_LABEL} in the public folder, or
+            upload a trace file.
           </div>
         </div>
         {showUploadPrompt && (
@@ -3890,7 +2001,9 @@ function App() {
             {localTraceName ? (
               <span className="upload-hint">Using local file: {localTraceName}</span>
             ) : (
-              <span className="upload-hint">Used when backend and public trace are unavailable</span>
+              <span className="upload-hint">
+                Used when backend and public trace are unavailable
+              </span>
             )}
           </div>
         )}
@@ -3906,426 +2019,100 @@ function App() {
     );
   }
 
-  // Widget layout - DynaVis-style compact toolbar
-  const widgetLayout = widgetConfig?.layout || {};
-  const widgetContainerStyle = {}; // Let CSS handle container styling
-  const widgetAreaStyle = {
-    // Minimal overrides - let CSS handle most styling
-    maxWidth: widgetLayout.maxWidth && widgetLayout.maxWidth !== '100%' 
-      ? toCssSize(widgetLayout.maxWidth, '100%') 
-      : undefined
-  };
-  const widgetCardStyle = {}; // Let CSS handle card styling
-  const widgetTitleStyle = {}; // Let CSS handle title styling
-
   return (
     <div className="App">
       <div className="main-content">
-        <div className="left-panel">
-          <div className="controls" style={widgetContainerStyle}>
-            <div className="widget-area" ref={widgetAreaRef} style={widgetAreaStyle}>
-              {widgets.length === 0 ? (
-                <div className="widget-placeholder">
-                  No widgets yet. Ask the assistant to create a widget.
-                </div>
-              ) : (
-                widgets.map(widget => (
-                  <div
-                    key={widget.id}
-                    className="widget-card"
-                    data-widget-id={widget.id}
-                    style={widgetCardStyle}
-                  >
-                    <div className="widget-title" style={widgetTitleStyle}>
-                      {widget.name}
-                    </div>
-                    <div
-                      className="widget-body"
-                      dangerouslySetInnerHTML={{ __html: widget.html }}
-                    />
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-          <div
-            className="chart-container"
-            style={{
-              position: 'relative',
-              '--gantt-yaxis-width': `${yAxisWidth}px`
-            }}
-          >
-            <div className="gantt-topbar">
-              <div ref={minimapRef} className="gantt-minimap" />
-              <div ref={xAxisRef} className="gantt-xaxis" />
-            </div>
-            <div ref={yAxisRef} className="gantt-yaxis" />
-            <div ref={chartRef} className="chart gantt-viewport"></div>
-            <GanttDrawingOverlay
-              ref={drawingOverlayRef}
-              isActive={isDrawingMode}
-              brushSize={brushSize}
-              brushColor={brushColor}
-            />
-          </div>
-        </div>
-        
-        <div className="right-panel">
+        <LeftPanel>
+          <WidgetArea widgets={widgets} widgetConfig={widgetConfig} widgetAreaRef={widgetAreaRef} />
+          <GanttChart
+            chartRef={chartRef}
+            minimapRef={minimapRef}
+            xAxisRef={xAxisRef}
+            yAxisRef={yAxisRef}
+            drawingOverlayRef={drawingOverlayRef}
+            isDrawingMode={isDrawingMode}
+            brushSize={brushSize}
+            brushColor={brushColor}
+            yAxisWidth={yAxisWidth}
+          />
+        </LeftPanel>
+
+        <RightPanel>
           <div className="chat-header">
             <h3>Chart Assistant</h3>
             <p className="chat-subtitle">Ask questions about your data</p>
           </div>
 
-          <div className="chat-config-panel">
-            {GANTT_CONFIG_UI_SPEC.map((domain) => (
-              <div key={domain.id} className="config-domain">
-                <div className="config-domain-header">
-                  <span className="config-domain-title">{domain.title}</span>
-                  {domain.description && (
-                    <span className="config-domain-subtitle">{domain.description}</span>
-                  )}
-                </div>
-                <div className="config-buttons">
-                  {domain.items.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`config-button ${activeConfigItem?.id === item.id ? 'active' : ''} ${configHighlightId === item.id ? 'highlight' : ''}`}
-                      data-config-item-id={item.id}
-                      title={item.description || item.label}
-                      onClick={() => handleOpenConfigEditor(item)}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
+          <ConfigPanel
+            configSpec={GANTT_CONFIG_UI_SPEC}
+            activeConfigItem={activeConfigItem}
+            configHighlightId={configHighlightId}
+            onOpenConfigEditor={handleOpenConfigEditor}
+            widgets={widgets}
+            activeWidget={activeWidget}
+            widgetHighlightId={widgetHighlightId}
+            onOpenWidgetEditor={handleOpenWidgetEditor}
+          />
 
-            {/* Added Widgets Section */}
-            <div className="config-domain widgets-domain">
-              <div className="config-domain-header">
-                <span className="config-domain-title">Added Widgets</span>
-                <span className="config-domain-subtitle">Custom UI widgets created by the assistant</span>
-              </div>
-              <div className="config-buttons widget-buttons">
-                {widgets.length === 0 ? (
-                  <span className="no-widgets-hint">No widgets yet. Enable Widget Mode below to create widgets.</span>
-                ) : (
-                  widgets.map((widget) => (
-                    <button
-                      key={widget.id}
-                      type="button"
-                      className={`config-button widget-config-button ${activeWidget?.id === widget.id ? 'active' : ''} ${widgetHighlightId === widget.id ? 'highlight' : ''}`}
-                      data-widget-id={widget.id}
-                      title={widget.description || widget.name}
-                      onClick={() => handleOpenWidgetEditor(widget)}
-                    >
-                      {widget.name}
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
+          <ChatMessages
+            messages={messages}
+            isStreaming={isStreaming}
+            currentStreamingMessage={currentStreamingMessage}
+            chatEndRef={chatEndRef}
+            parseMessageSegments={parseMessageSegments}
+          />
 
-          <div className="chat-messages">
-            {messages.length === 0 && (
-              <div className="chat-welcome">
-                <p>👋 Hello! I'm your chart assistant.</p>
-                <p>Ask me anything about the Gantt chart data, task scheduling, or resource utilization.</p>
-              </div>
-            )}
-            
-            {messages.map((msg, idx) => (
-              <div key={idx} className={`message ${msg.role}`}>
-                <div className="message-content">
-                  {parseMessageSegments(msg.content).map((segment, segmentIndex) => {
-                    if (segment.type === 'code') {
-                      const languageLabel = segment.language
-                        ? `${segment.language.toUpperCase()} code`
-                        : 'Code';
-                      return (
-                        <details
-                          key={`msg-${idx}-code-${segmentIndex}`}
-                          className="message-code"
-                        >
-                          <summary>
-                            <span className="message-code-label">{languageLabel}</span>
-                            <span className="message-code-hint message-code-hint-closed">
-                              Show code
-                            </span>
-                            <span className="message-code-hint message-code-hint-open">
-                              Hide code
-                            </span>
-                          </summary>
-                          <pre className="message-code-block">
-                            <code>{segment.content}</code>
-                          </pre>
-                        </details>
-                      );
-                    }
-                    return (
-                      <span
-                        key={`msg-${idx}-text-${segmentIndex}`}
-                        className="message-text"
-                      >
-                        {segment.content}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-            
-            {isStreaming && currentStreamingMessage && (
-              <div className="message assistant streaming">
-                <div className="message-content">
-                  {currentStreamingMessage}
-                  <span className="cursor-blink">▊</span>
-                </div>
-              </div>
-            )}
-            
-            {isStreaming && !currentStreamingMessage && (
-              <div className="message assistant">
-                <div className="message-content">
-                  <span className="typing-indicator">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                  </span>
-                </div>
-              </div>
-            )}
-            
-            <div ref={chatEndRef} />
-          </div>
-          
-          {/* Image Thumbnails Gallery */}
-          {savedImages.length > 0 && (
-            <div className="image-gallery">
-              <div className="gallery-header">Captured Images ({savedImages.length})</div>
-              <div className="gallery-thumbnails">
-                {savedImages.map((image) => (
-                  <div 
-                    key={image.id}
-                    className={`thumbnail-wrapper ${selectedImageId === image.id ? 'selected' : ''}`}
-                    onClick={() => handleSelectImage(image.id)}
-                  >
-                    <img 
-                      src={image.dataUrl} 
-                      alt="Captured chart" 
-                      className="thumbnail-image"
-                    />
-                    <button
-                      className="thumbnail-delete"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteImage(image.id);
-                      }}
-                      title="Delete image"
-                    >
-                      ×
-                    </button>
-                    {selectedImageId === image.id && (
-                      <div className="thumbnail-selected-badge">✓</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          
-          <div className="chat-input-container">
-            <div className="chat-mode-controls">
-              <div className="chat-drawing-controls">
-                <DrawingControls
-                  isActive={isDrawingMode}
-                  onToggle={setIsDrawingMode}
-                  onClear={handleClear}
-                  brushSize={brushSize}
-                  setBrushSize={setBrushSize}
-                  brushColor={brushColor}
-                  setBrushColor={setBrushColor}
-                  showSort={false}
-                />
-              </div>
-              <div className="widget-mode-toggle">
-                <label className="toggle-label" title="Enable widget creation mode">
-                  <input
-                    type="checkbox"
-                    checked={isWidgetAgentMode}
-                    onChange={(e) => setIsWidgetAgentMode(e.target.checked)}
-                  />
-                  <span className="toggle-slider"></span>
-                  <span className="toggle-text">Widget Mode</span>
-                </label>
-              </div>
-            </div>
-            <div className="input-controls-row">
-              <button 
-                className="capture-button"
-                onClick={handleCaptureImage}
-                disabled={!isDrawingMode}
-                title="Capture annotated chart"
-              >
-                📸
-              </button>
-              <textarea
-                className={`chat-input ${isWidgetAgentMode ? 'widget-mode' : ''}`}
-                placeholder={isWidgetAgentMode ? "Describe the widget you want to create..." : "Ask about the chart data..."}
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                onKeyPress={handleKeyPress}
-                disabled={isStreaming}
-                rows="3"
-              />
-              <button 
-                className="send-button"
-                onClick={handleSendMessage}
-                disabled={isStreaming || !inputMessage.trim()}
-              >
-                {isStreaming ? 'Sending...' : 'Send'}
-              </button>
-            </div>
-            {selectedImageId && (
-              <div className="selected-image-indicator">
-                📎 Image will be sent with message
-              </div>
-            )}
-            {isWidgetAgentMode && (
-              <div className="widget-mode-indicator">
-                🧩 Widget Mode: Describe a widget to create (e.g., "Create a filter dropdown for process names")
-              </div>
-            )}
-          </div>
+          <ImageGallery
+            savedImages={savedImages}
+            selectedImageId={selectedImageId}
+            onSelectImage={handleSelectImage}
+            onDeleteImage={handleDeleteImage}
+          />
 
-          {activeConfigItem && (
-            <div className="config-editor-modal" role="dialog" aria-modal="true">
-              <div className={`config-editor config-editor-window ${configHighlightId === activeConfigItem.id ? 'highlight' : ''}`}>
-                <div className="config-editor-header">
-                  <div className="config-editor-title">
-                    Edit: {activeConfigItem.label}
-                  </div>
-                  <div className="config-editor-path">
-                    {activeConfigItem.path}
-                  </div>
-                </div>
-                {activeConfigItem.description && (
-                  <div className="config-editor-description">
-                    {activeConfigItem.description}
-                  </div>
-                )}
-                <textarea
-                  ref={configEditorTextareaRef}
-                  className={`config-editor-textarea ${configHighlightId === activeConfigItem.id ? 'highlight' : ''}`}
-                  value={configEditorText}
-                  onChange={(e) => setConfigEditorText(e.target.value)}
-                  placeholder="Paste JSON value here"
-                  rows={8}
-                />
-                {activeConfigItem.example && (
-                  <pre className="config-editor-example">
-                    {activeConfigItem.example}
-                  </pre>
-                )}
-                {configEditorError && (
-                  <div className="config-editor-error">{configEditorError}</div>
-                )}
-                <div className="config-editor-actions">
-                  <button
-                    type="button"
-                    className="config-editor-save"
-                    onClick={handleSaveConfigEditor}
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    className="config-editor-cancel"
-                    onClick={handleCloseConfigEditor}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <ChatInput
+            inputMessage={inputMessage}
+            setInputMessage={setInputMessage}
+            isStreaming={isStreaming}
+            onSend={handleSendMessage}
+            onKeyPress={handleKeyPress}
+            isWidgetAgentMode={isWidgetAgentMode}
+            setIsWidgetAgentMode={setIsWidgetAgentMode}
+            isDrawingMode={isDrawingMode}
+            setIsDrawingMode={setIsDrawingMode}
+            brushSize={brushSize}
+            setBrushSize={setBrushSize}
+            brushColor={brushColor}
+            setBrushColor={setBrushColor}
+            onClear={handleClear}
+            onCaptureImage={handleCaptureImage}
+            selectedImageId={selectedImageId}
+          />
 
-          {activeWidget && (
-            <div className="config-editor-modal widget-editor-modal" role="dialog" aria-modal="true">
-              <div className={`config-editor widget-editor-window ${widgetHighlightId === activeWidget.id ? 'highlight' : ''}`}>
-                <div className="config-editor-header widget-editor-header">
-                  <div className="config-editor-title">
-                    Edit Widget: {activeWidget.name}
-                  </div>
-                  <div className="config-editor-path">
-                    ID: {activeWidget.id}
-                  </div>
-                </div>
-                {activeWidget.description && (
-                  <div className="config-editor-description">
-                    {activeWidget.description}
-                  </div>
-                )}
-                <textarea
-                  className={`config-editor-textarea widget-editor-textarea ${widgetHighlightId === activeWidget.id ? 'highlight' : ''}`}
-                  value={widgetEditorText}
-                  onChange={(e) => setWidgetEditorText(e.target.value)}
-                  placeholder="Edit widget JSON here"
-                  rows={12}
-                />
-                <pre className="config-editor-example widget-editor-example">
-{`Widget format:
-{
-  "id": "widget-id",
-  "name": "Widget Name",
-  "html": "<label>...</label><select>...</select>",
-  "listeners": [
-    {
-      "selector": "select",
-      "event": "change",
-      "handler": "console.log(payload.value);"
-    }
-  ],
-  "description": "What this widget does"
-}`}
-                </pre>
-                {widgetEditorError && (
-                  <div className="config-editor-error">{widgetEditorError}</div>
-                )}
-                <div className="config-editor-actions widget-editor-actions">
-                  <button
-                    type="button"
-                    className="config-editor-save"
-                    onClick={handleSaveWidgetEditor}
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    className="config-editor-cancel widget-delete-button"
-                    onClick={() => handleDeleteWidget(activeWidget.id)}
-                  >
-                    Delete
-                  </button>
-                  <button
-                    type="button"
-                    className="config-editor-cancel"
-                    onClick={handleCloseWidgetEditor}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+          <ConfigEditorModal
+            activeConfigItem={activeConfigItem}
+            configEditorText={configEditorText}
+            setConfigEditorText={setConfigEditorText}
+            configEditorError={configEditorError}
+            configHighlightId={configHighlightId}
+            configEditorTextareaRef={configEditorTextareaRef}
+            onSave={handleSaveConfigEditor}
+            onClose={handleCloseConfigEditor}
+          />
+
+          <WidgetEditorModal
+            activeWidget={activeWidget}
+            widgetEditorText={widgetEditorText}
+            setWidgetEditorText={setWidgetEditorText}
+            widgetEditorError={widgetEditorError}
+            widgetHighlightId={widgetHighlightId}
+            onSave={handleSaveWidgetEditor}
+            onDelete={handleDeleteWidget}
+            onClose={handleCloseWidgetEditor}
+          />
+        </RightPanel>
       </div>
     </div>
   );
 }
 
 export default App;
-

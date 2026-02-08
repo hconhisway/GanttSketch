@@ -7,16 +7,19 @@ The Gantt Chart Drawing Module allows users to draw annotations directly on top 
 ## Features
 
 ### 1. **Drawing Mode**
+
 - Toggle between normal chart interaction and drawing mode
 - Freehand drawing directly on the chart
 - Visual indicator when drawing mode is active
 
 ### 2. **Drawing Tools**
+
 - **Brush Color**: Choose from 10 preset colors
 - **Brush Size**: Adjustable from 1 to 20 pixels
 - **Color Picker**: Visual palette for quick color selection
 
 ### 3. **Drawing Controls**
+
 - **Draw Button**: Toggle drawing mode on/off
 - **Color Button**: Open color palette selector
 - **Size Slider**: Adjust brush thickness
@@ -24,6 +27,7 @@ The Gantt Chart Drawing Module allows users to draw annotations directly on top 
 - **Export Button**: Save annotated chart as PNG
 
 ### 4. **Export Functionality**
+
 - Exports chart with all annotations as a high-quality PNG
 - Automatic download with timestamp
 - Confirms export with chat message
@@ -85,15 +89,18 @@ src/
 #### GanttDrawingOverlay Component
 
 **Props:**
+
 - `isActive` (boolean): Controls drawing mode state
 - `onToggle` (function): Callback to toggle drawing mode
 - `onExport` (function): Callback when export is triggered
 
 **Ref Methods:**
+
 - `exportAnnotatedImage()`: Returns PNG blob of annotated chart
 - `clearCanvas()`: Removes all drawings
 
 **State Management:**
+
 - `paths`: Array of completed drawing paths
 - `currentPath`: SVG path data for active stroke
 - `brushSize`: Current brush thickness (1-20)
@@ -141,7 +148,7 @@ const drawingOverlayRef = useRef();
     onToggle={setIsDrawingMode}
     onExport={handleExport}
   />
-</div>
+</div>;
 ```
 
 ## Styling
@@ -149,16 +156,19 @@ const drawingOverlayRef = useRef();
 The drawing module includes responsive styles:
 
 ### Desktop (> 900px)
+
 - Controls positioned in top-right corner
 - Full-size buttons and controls
 - Horizontal layout
 
 ### Tablet (600-900px)
+
 - Controls move to bottom
 - Centered layout
 - Slightly smaller controls
 
 ### Mobile (< 600px)
+
 - Compact button sizes
 - Smaller color palette
 - Touch-friendly sizing
@@ -166,6 +176,7 @@ The drawing module includes responsive styles:
 ## Color Palette
 
 The module includes 10 preset colors:
+
 - 🔴 Red (#ff0000)
 - 🟢 Green (#00ff00)
 - 🔵 Blue (#0000ff)
@@ -204,6 +215,7 @@ The module includes 10 preset colors:
 ## Future Enhancements
 
 Potential improvements:
+
 - [ ] Undo/Redo functionality
 - [ ] Text annotations
 - [ ] Shape tools (rectangles, circles, arrows)
@@ -218,18 +230,23 @@ Potential improvements:
 ## Troubleshooting
 
 ### Issue: Drawings not appearing
+
 **Solution**: Ensure drawing mode is active (button shows "✏️ Drawing")
 
 ### Issue: Export produces blank image
+
 **Solution**: Check that chart is rendered before exporting
 
 ### Issue: Can't click chart elements
+
 **Solution**: Exit drawing mode to interact with chart
 
 ### Issue: Color picker not closing
+
 **Solution**: Click a color or click outside the palette
 
 ### Issue: Drawings disappear on chart update
+
 **Solution**: Drawings are preserved during data updates
 
 ## API Reference
@@ -238,18 +255,18 @@ Potential improvements:
 
 #### Props
 
-| Prop | Type | Required | Description |
-|------|------|----------|-------------|
-| isActive | boolean | Yes | Controls drawing mode |
-| onToggle | function | Yes | Callback to toggle mode |
-| onExport | function | Yes | Callback on export |
+| Prop     | Type     | Required | Description             |
+| -------- | -------- | -------- | ----------------------- |
+| isActive | boolean  | Yes      | Controls drawing mode   |
+| onToggle | function | Yes      | Callback to toggle mode |
+| onExport | function | Yes      | Callback on export      |
 
 #### Ref Methods
 
-| Method | Returns | Description |
-|--------|---------|-------------|
+| Method                 | Returns         | Description          |
+| ---------------------- | --------------- | -------------------- |
 | exportAnnotatedImage() | Promise\<Blob\> | Exports chart as PNG |
-| clearCanvas() | void | Clears all drawings |
+| clearCanvas()          | void            | Clears all drawings  |
 
 #### Events
 
@@ -291,7 +308,7 @@ const handleExport = (blob) => {
     // Upload to server
     const formData = new FormData();
     formData.append('chart', blob, 'chart.png');
-    
+
     fetch('/api/upload', {
       method: 'POST',
       body: formData
@@ -307,6 +324,7 @@ This module is part of the GanttSketch project and follows the same license.
 ## Support
 
 For issues or questions:
+
 1. Check this documentation
 2. Review the code comments
 3. Test in different browsers
@@ -317,4 +335,3 @@ For issues or questions:
 **Version**: 1.0.0  
 **Last Updated**: November 2025  
 **Author**: GanttSketch Team
-

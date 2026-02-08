@@ -1,0 +1,211 @@
+.chat-config-panel {
+  padding: 12px 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #e0e0e0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.config-domain {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  margin-bottom: 10px;
+}
+
+.config-domain:last-child {
+  margin-bottom: 0;
+}
+
+.config-domain-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.config-domain-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #1f2937;
+}
+
+.config-domain-subtitle {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.config-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.config-button {
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #1f2937;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
+}
+
+.config-button:hover {
+  border-color: #667eea;
+}
+
+.config-button.active {
+  background: #e0e7ff;
+  border-color: #667eea;
+}
+
+.config-button.highlight {
+  background: #fff7ed;
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+/* Tracks Configuration Section */
+.tracks-config-section {
+  padding-top: 15px;
+  margin-top: 15px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.tracks-config-section h3 {
+  color: #333;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+.config-row {
+  margin: 8px 0;
+}
+
+.config-row label {
+  font-size: 14px;
+  color: #333;
+  font-weight: 500;
+}
+
+.config-row select {
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  background: white;
+  color: #333;
+  cursor: pointer;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+  transition: border-color 0.2s;
+}
+
+.config-row select:hover {
+  border-color: #667eea;
+}
+
+.config-row select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+.config-row button {
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-weight: 500;
+}
+
+.config-row button:hover:not(:disabled) {
+  background: #5568d3;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+}
+
+.config-row button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.config-row button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Special styling for danger/clear buttons */
+.config-row button[style*='background: rgb(244, 67, 54)'],
+.config-row button[style*='backgroundColor: #f44336'] {
+  background: #f44336 !important;
+}
+
+.config-row button[style*='background: rgb(244, 67, 54)']:hover:not(:disabled),
+.config-row button[style*='backgroundColor: #f44336']:hover:not(:disabled) {
+  background: #d32f2f !important;
+}
+
+/* Added Widgets Section */
+.widgets-domain {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  border-color: rgba(102, 126, 234, 0.2);
+}
+
+.widget-buttons {
+  min-height: 30px;
+}
+
+.no-widgets-hint {
+  font-size: 11px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.widget-config-button {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border-color: rgba(102, 126, 234, 0.3);
+}
+
+.widget-config-button:hover {
+  border-color: #667eea;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+}
+
+.widget-config-button.active {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.25) 0%, rgba(118, 75, 162, 0.25) 100%);
+  border-color: #667eea;
+}
+
+.widget-config-button.highlight {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(234, 88, 12, 0.15) 100%);
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+  animation: widget-highlight-pulse 2s ease-in-out infinite;
+}
+
+@keyframes widget-highlight-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.3);
+  }
+}
