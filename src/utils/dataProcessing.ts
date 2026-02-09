@@ -398,11 +398,18 @@ export function transformData(rawData: any): any[] {
         // Prefer relative microsecond timestamps if present
         const startCandidate = ev.enter?.Timestamp ?? ev.Timestamp ?? raw.ts ?? ev.ts;
         const durCandidate = raw.dur ?? ev.dur ?? 0;
-        const endCandidate =
+        let endCandidate =
           ev.leave?.Timestamp ??
           (startCandidate !== undefined
             ? Number(startCandidate) + Number(durCandidate)
             : undefined);
+        // Backend may send leave.Timestamp 0; treat as invalid and use start + duration
+        if (endCandidate !== undefined && Number(endCandidate) <= Number(startCandidate || 0)) {
+          endCandidate =
+            startCandidate !== undefined
+              ? Number(startCandidate) + Math.max(1, Number(durCandidate) || 1)
+              : undefined;
+        }
 
         const start = Number(startCandidate);
         const end = Number(endCandidate);

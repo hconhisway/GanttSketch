@@ -1,6 +1,18 @@
-import { GANTT_CONFIG_UI_SPEC } from '../ganttConfigUiSpec';
+import { GANTT_CONFIG_UI_SPEC } from '../config/ganttConfigUiSpec';
 
-export const FLAT_CONFIG_ITEMS = GANTT_CONFIG_UI_SPEC.flatMap((domain) => domain.items);
+export type ConfigItem = {
+  id: string;
+  label: string;
+  path: string;
+  description?: string;
+  example?: string;
+};
+
+type ConfigDomain = { items: ConfigItem[] };
+
+const CONFIG_SPEC = GANTT_CONFIG_UI_SPEC as ConfigDomain[];
+
+export const FLAT_CONFIG_ITEMS: ConfigItem[] = CONFIG_SPEC.flatMap((domain) => domain.items);
 
 export function parseMessageSegments(
   content: unknown

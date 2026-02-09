@@ -8,6 +8,7 @@ export function comparePid(a: unknown, b: unknown): number {
 }
 
 export function normalizeProcessOrderRule(yAxisConfig: any, fallbackMode: string): any {
+  if (yAxisConfig?.hierarchy1OrderRule) return yAxisConfig.hierarchy1OrderRule;
   if (yAxisConfig?.processOrderRule) return yAxisConfig.processOrderRule;
   const legacyMode = yAxisConfig?.orderMode || fallbackMode;
   const includeUnspecified = yAxisConfig?.includeUnspecified !== false;
@@ -41,13 +42,29 @@ export function inferProcessSortModeFromRule(rule: any): 'default' | 'fork' {
   return 'default';
 }
 
-export function resolveThreadLaneMode(rule: any, fallbackMode: string): 'level' | 'auto' {
-  if (rule?.type === 'transform' || rule?.name) {
-    if (rule.name === 'byLevel') return 'level';
-    if (rule.name === 'autoPack') return 'auto';
-  }
+export function resolveThreadLaneMode(rule: any, fallbackMode?: string): 'level' | 'auto' {
+  const name =
+    typeof rule === 'string'
+      ? rule
+      : rule?.name ?? rule?.params?.name;
+  if (name === 'autoPack') return 'auto';
+  if (name === 'byField' || name === 'byLevel') return 'level';
   if (fallbackMode === 'level' || fallbackMode === 'auto') return fallbackMode;
   return 'auto';
+}
+
+/**
+ * Field path used to group events into hierarchy2 lanes when rule is byField (or legacy byLevel).
+ * Links directly to any event attribute (e.g. "level", "args.depth", "cat"). No fixed fields.
+ * When params.field is omitted, returns "level" so grouping is still applied (caller may try alternates).
+ */
+export function getThreadLaneFieldPath(rule: any): string {
+  if (!rule || typeof rule !== 'object') return '';
+  const name = rule?.name ?? rule?.params?.name;
+  if (name !== 'byField' && name !== 'byLevel') return '';
+  const field = rule.params?.field ?? rule.field;
+  if (typeof field === 'string' && field.trim()) return field.trim();
+  return 'level';
 }
 
 export function applyProcessOrderRule(
@@ -89,12 +106,12 @@ export function applyProcessOrderRule(
     if (!step) return;
     const name = getRuleName(step);
     const params = ruleParams(step);
-    if (name === 'pidAsc') {
+    if (name === 'pidAsc' || name === 'hierarchy1Asc') {
       ordered = [...ordered].sort(comparePid);
       depthByPid = new Map(ordered.map((pid) => [pid, 0]));
       return;
     }
-    if (name === 'pidDesc') {
+    if (name === 'pidDesc' || name === 'hierarchy1Desc') {
       ordered = [...ordered].sort((a, b) => -comparePid(a, b));
       depthByPid = new Map(ordered.map((pid) => [pid, 0]));
       return;
@@ -262,19 +279,32 @@ export function applyProcessOrderRule(
       const nextOrdered: string[] = [];
       const nextDepth = new Map<string, number>();
       const visited = new Set<string>();
-      const dfs = (pid: string, depth: number) => {
-        if (!pid || visited.has(pid)) return;
-        visited.add(pid);
-        nextOrdered.push(pid);
-        nextDepth.set(pid, depth);
-        const kids = childrenByPidExisting.get(pid) || [];
-        for (const child of kids) dfs(child, depth + 1);
+      const dfsIterative = (startPids: string[]) => {
+        const stack: Array<{ pid: string; depth: number }> = [];
+        for (let i = startPids.length - 1; i >= 0; i -= 1) {
+          stack.push({ pid: startPids[i], depth: 0 });
+        }
+        while (stack.length > 0) {
+          const current = stack.pop();
+          if (!current) continue;
+          const { pid, depth } = current;
+          if (!pid || visited.has(pid)) continue;
+          visited.add(pid);
+          nextOrdered.push(pid);
+          nextDepth.set(pid, depth);
+          const kids = childrenByPidExisting.get(pid) || [];
+          for (let i = kids.length - 1; i >= 0; i -= 1) {
+            const child = kids[i];
+            if (!visited.has(child)) {
+              stack.push({ pid: child, depth: depth + 1 });
+            }
+          }
+        }
       };
-      roots.forEach((pid) => dfs(pid, 0));
+      dfsIterative(roots);
       if (includeUnspecified) {
-        baseOrder.forEach((pid) => {
-          if (!visited.has(pid)) dfs(pid, 0);
-        });
+        const remaining = baseOrder.filter((pid) => !visited.has(pid));
+        dfsIterative(remaining);
       }
 
       ordered = nextOrdered.length > 0 ? nextOrdered : baseOrder;

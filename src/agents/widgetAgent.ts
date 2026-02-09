@@ -1,5 +1,5 @@
-import { summarizeWidgetConfig } from '../widgetConfig';
-import { formatConfigSchemaForPrompt } from '../ganttConfigSchema';
+import { summarizeWidgetConfig } from '../config/widgetConfig';
+import { formatConfigSchemaForPrompt } from '../config/ganttConfigSchema';
 
 export const WIDGET_AGENT_GUIDE = `You are a widget creation agent for the Gantt chart UI.
 Your job is to create widgets that live in the top-left widget area, or update the widget layout/style.
@@ -107,7 +107,7 @@ api.setProcessSortMode(mode);
 const rule = mode === 'fork'
   ? { type: 'transform', name: 'forkTree', params: { includeUnspecified: true } }
   : { type: 'transform', name: 'pidAsc' };
-api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), { yAxis: { processOrderRule: rule } }));
+api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), { yAxis: { hierarchy1OrderRule: rule } }));
 \`\`\`
 
 **Toggle Between Two States:**
@@ -168,9 +168,9 @@ function formatDataSchema(dataSchema: any) {
 
   const lines = ['Fields in the data:'];
 
-  if (dataSchema.pid) lines.push(`- pid: ${dataSchema.pid} (process ID field)`);
-  if (dataSchema.tid) lines.push(`- tid: ${dataSchema.tid} (thread ID field)`);
-  if (dataSchema.ppid) lines.push(`- ppid: ${dataSchema.ppid} (parent process ID)`);
+  if (dataSchema.pid) lines.push(`- pid: ${dataSchema.pid} (hierarchy1 ID field)`);
+  if (dataSchema.tid) lines.push(`- tid: ${dataSchema.tid} (hierarchy2 ID field)`);
+  if (dataSchema.ppid) lines.push(`- ppid: ${dataSchema.ppid} (parent hierarchy1 ID)`);
   if (dataSchema.name) lines.push(`- name: ${dataSchema.name} (event name field)`);
   if (dataSchema.cat) lines.push(`- cat: ${dataSchema.cat} (category field)`);
   if (dataSchema.ts) lines.push(`- ts: ${dataSchema.ts} (timestamp field)`);

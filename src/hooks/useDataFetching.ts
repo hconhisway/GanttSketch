@@ -1,14 +1,21 @@
 import { useEffect } from 'react';
-import { analyzeAndInitialize, processEventsMinimal } from '../agents';
-import { applyGanttConfigPatch } from '../ganttConfig';
+import type { Dispatch, SetStateAction } from 'react';
+import {
+  analyzeAndInitialize,
+  processEventsMinimal,
+  dataMappingToFlatFieldMapping,
+  getTimeMultiplier
+} from '../agents';
+import { applyGanttConfigPatch } from '../config/ganttConfig';
 import {
   buildProcessForkRelations,
   buildProcessForkRelationsFromRawEvents,
-  fetchDataWithFallback,
-  transformData
+  fetchDataWithFallback
 } from '../utils/dataProcessing';
 import { inferProcessSortModeFromRule } from '../utils/processOrder';
 import { clampNumber } from '../utils/formatting';
+import { buildConfigBundle, downloadConfigBundle } from '../utils/configBundle';
+import type { GanttDataMapping, ProcessSortMode } from '../types/ganttConfig';
 
 interface UseDataFetchingArgs {
   obd: any;
@@ -16,18 +23,17 @@ interface UseDataFetchingArgs {
   endTime: number;
   bins: number;
   localTraceText: string;
-  dataSchema: any;
-  fieldMapping: any;
+  dataMapping: GanttDataMapping | null;
   ganttConfig: any;
   apiUrl: string;
   traceUrl: string;
   defaultEndUs: number;
   setIsFetching: (value: boolean) => void;
   setData: (next: any[]) => void;
-  setDataSchema: (next: any) => void;
-  setFieldMapping: (next: any) => void;
+  setRawEvents?: (next: any[] | null) => void;
+  setDataMapping: Dispatch<SetStateAction<GanttDataMapping | null>>;
   setGanttConfig: (next: any) => void;
-  setProcessSortMode: (mode: string) => void;
+  setProcessSortMode: Dispatch<SetStateAction<ProcessSortMode>>;
   setMessages: (updater: (prev: any[]) => any[]) => void;
   setObd: (next: any) => void;
   setEndTime: (next: number) => void;
@@ -41,6 +47,8 @@ interface UseDataFetchingArgs {
   viewRange: { start: number; end: number };
   forkRelationsRef: React.MutableRefObject<any>;
   forkLoggedRef: React.MutableRefObject<boolean>;
+  configSourceLabel?: string;
+  autoAnalyzeOnFirstLoad?: boolean;
 }
 
 export function useDataFetching({
@@ -49,16 +57,15 @@ export function useDataFetching({
   endTime,
   bins,
   localTraceText,
-  dataSchema,
-  fieldMapping,
+  dataMapping,
   ganttConfig,
   apiUrl,
   traceUrl,
   defaultEndUs,
   setIsFetching,
   setData,
-  setDataSchema,
-  setFieldMapping,
+  setRawEvents,
+  setDataMapping,
   setGanttConfig,
   setProcessSortMode,
   setMessages,
@@ -73,7 +80,9 @@ export function useDataFetching({
   redrawRef,
   viewRange,
   forkRelationsRef,
-  forkLoggedRef
+  forkLoggedRef,
+  configSourceLabel,
+  autoAnalyzeOnFirstLoad = true
 }: UseDataFetchingArgs) {
   // Fetch and transform data when parameters change
   useEffect(() => {
@@ -82,48 +91,88 @@ export function useDataFetching({
     const loadData = async () => {
       try {
         setIsFetching(true);
+        // Convert UI microseconds to source time unit for backend fetch
+        const sourceUnit = dataMapping?.xAxis?.timeUnit;
+        const toSourceTime = (valueUs: number) => {
+          switch (sourceUnit) {
+            case 'ns':
+              return valueUs * 1000;
+            case 'ms':
+              return valueUs / 1000;
+            case 's':
+              return valueUs / 1_000_000;
+            case 'us':
+            default:
+              return valueUs;
+          }
+        };
+        const fetchStart = toSourceTime(startTime);
+        const fetchEnd = toSourceTime(endTime);
+
         const rawData = await fetchDataWithFallback(
-          startTime,
-          endTime,
+          fetchStart,
+          fetchEnd,
           bins,
           apiUrl,
           traceUrl,
           localTraceText
         );
+        const rawEvents = Array.isArray(rawData?.events) ? rawData.events : [];
+        if (typeof setRawEvents === 'function') {
+          setRawEvents(rawEvents.length > 0 ? rawEvents : null);
+        }
 
-        // Process data - detect schema on first load, use existing mapping for subsequent loads
-        let transformed;
+        // Debug: inspect shape of data received by frontend
+        const events = rawData?.events;
+        const eventCount = Array.isArray(events) ? events.length : 0;
+        const sample = eventCount > 0 ? events[0] : null;
+        const sampleStr = sample ? JSON.stringify(sample, null, 2) : '';
+        const sampleSize = sampleStr.length;
+        console.group('[Frontend] Raw data received');
+        console.log('Top-level keys:', rawData ? Object.keys(rawData) : []);
+        console.log('events count:', eventCount);
+        if (rawData?.metadata) console.log('metadata:', rawData.metadata);
+        if (sample) {
+          console.log('First event keys:', Object.keys(sample));
+          console.log(
+            'First event (sample) size:', sampleSize, 'chars (~' + Math.ceil(sampleSize / 4) + ' tokens)'
+          );
+          console.log('First event sample:', sampleStr.slice(0, 2000) + (sampleStr.length > 2000 ? '\n... (truncated)' : ''));
+        }
+        console.groupEnd();
+
+        // Process data via agent mapping only (no transformData fallback)
+        let transformed: any[] = [];
         let analysisResult: any = null;
 
-        // First time loading: detect schema and create field mapping
-        if (!dataSchema && Array.isArray(rawData?.events) && rawData.events.length > 0) {
-          try {
-            console.log('Running Data Analysis Agent for schema detection...');
-            analysisResult = (await analyzeAndInitialize(rawData.events)) as any;
-
-            if (analysisResult.events && analysisResult.events.length > 0) {
-              // Use processed events (original fields preserved, internal _start/_end added)
-              transformed = analysisResult.events;
-              console.log(
-                `Processed ${transformed.length} events (original field names preserved)`
+        if (!dataMapping && Array.isArray(rawData?.events) && rawData.events.length > 0) {
+          // First load: run agent to detect mapping and process events
+          if (autoAnalyzeOnFirstLoad) {
+            try {
+              console.log('Running Data Analysis Agent for data mapping detection...');
+              analysisResult = (await analyzeAndInitialize(rawData.events)) as any;
+              if (analysisResult?.usedFallback) {
+                setError(
+                  analysisResult?.error ||
+                    'Data Analysis Agent failed. Check console for details.'
+                );
+              } else if (analysisResult?.events) {
+                transformed = analysisResult.events;
+              }
+              console.log(`Processed ${transformed.length} events via agent mapping`);
+            } catch (err) {
+              console.error('Data Analysis Agent failed:', err);
+              setError(
+                (err as Error)?.message ||
+                  'Failed to detect data mapping. Check console for details.'
               );
-            } else {
-              // Fallback to legacy transform
-              console.log('Schema detection returned no events, using legacy transform');
-              transformed = transformData(rawData);
             }
-          } catch (err) {
-            console.error('Schema detection failed, using legacy transform:', err);
-            transformed = transformData(rawData);
           }
-        } else {
-          // Subsequent loads: apply field mapping if available
-          if (fieldMapping && Array.isArray(rawData?.events) && rawData.events.length > 0) {
-            transformed = processEventsMinimal(rawData.events, fieldMapping);
-          } else {
-            // Fallback to legacy transform if no mapping or no events
-            transformed = transformData(rawData);
-          }
+          // When autoAnalyzeOnFirstLoad is false, Data Setup Modal handles mapping
+        } else if (dataMapping && Array.isArray(rawData?.events) && rawData.events.length > 0) {
+          const flatMapping = dataMappingToFlatFieldMapping(dataMapping);
+          const timeMultiplier = getTimeMultiplier(dataMapping.xAxis.timeUnit);
+          transformed = processEventsMinimal(rawData.events, flatMapping, timeMultiplier);
         }
 
         // Build pid fork relations from raw events first (start events may be instantaneous and
@@ -177,6 +226,14 @@ export function useDataFetching({
           }
         }
 
+        // When refetch returns 0 events but we already have a mapping, keep existing chart data
+        // so the chart does not go empty (e.g. backend returns empty for current time range).
+        const shouldUpdateData =
+          transformed.length > 0 || !dataMapping;
+        if (shouldUpdateData) {
+          setData(transformed);
+        }
+
         if (!forkLoggedRef.current && Array.isArray(transformed) && transformed.length > 0) {
           forkLoggedRef.current = true;
           try {
@@ -215,7 +272,6 @@ export function useDataFetching({
               console.warn('conflicts:', rel.conflicts);
             }
 
-            // If still no edges, print a small diagnostic snapshot to match against input schema.
             if (rel.edges.length === 0) {
               console.warn('[fork] no edges detected. Debug snapshot:', {
                 rawStartContainsCount: forkFromRaw?.debug?.startContainsCount ?? 0,
@@ -228,24 +284,14 @@ export function useDataFetching({
             }
             console.groupEnd();
           } catch (e) {
-            // Never break data load due to debug logging.
             console.warn('[fork] failed to log fork relations:', e);
           }
         }
 
-        setData(transformed);
-
-        // Apply analysis results if we detected schema on this load
-        if (
-          analysisResult &&
-          analysisResult.schema &&
-          analysisResult.schema.fields &&
-          !dataSchema
-        ) {
-          setDataSchema(analysisResult.schema);
-          setFieldMapping(analysisResult.fieldMapping);
-          console.log('Data schema detected:', analysisResult.schema);
-          console.log('Field mapping:', analysisResult.fieldMapping);
+        // Apply analysis results if we detected the mapping on this load
+        if (analysisResult && analysisResult.dataMapping && !dataMapping && !analysisResult.usedFallback) {
+          setDataMapping(analysisResult.dataMapping);
+          console.log('Data mapping detected:', analysisResult.dataMapping);
 
           // Apply initial config if one was generated
           if (analysisResult.config && Object.keys(analysisResult.config).length > 0) {
@@ -253,24 +299,42 @@ export function useDataFetching({
             const nextConfig = applyGanttConfigPatch(ganttConfig, analysisResult.config);
             setGanttConfig(nextConfig);
 
-            // Update process sort mode if yAxis config was changed
-            if (analysisResult.config.yAxis?.processOrderRule) {
+            if (analysisResult.config.yAxis?.hierarchy1OrderRule) {
               setProcessSortMode(
-                inferProcessSortModeFromRule(analysisResult.config.yAxis.processOrderRule)
+                inferProcessSortModeFromRule(analysisResult.config.yAxis.hierarchy1OrderRule)
               );
             }
 
+            const fieldCount = analysisResult.dataMapping.schema?.allFields?.length ?? 0;
             setMessages((prev) => [
               ...prev,
               {
                 role: 'system',
-                content: `Info: Data schema auto-detected with ${analysisResult.schema.fields.length} fields. Initial configuration applied.`
+                content: `Info: Data mapping auto-detected (${fieldCount} fields, format: ${analysisResult.dataMapping.schema?.dataFormat || 'unknown'}). Initial configuration applied.`
               }
             ]);
           }
+
+          try {
+            const bundle = buildConfigBundle(
+              analysisResult.dataMapping,
+              analysisResult.config,
+              configSourceLabel
+            );
+            downloadConfigBundle(bundle);
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: 'system',
+                content: 'Info: Configuration bundle downloaded for this dataset.'
+              }
+            ]);
+          } catch (error) {
+            console.warn('Failed to auto-download config bundle:', error);
+          }
         }
 
-        // Auto-fit time range (slider max) to real data end (max event end), when we are viewing the full current range.
+        // Auto-fit time range
         if (transformed && transformed.length > 0) {
           const dataMaxEnd = transformed.reduce(
             (max: number, e: any) => Math.max(max, Number(e.end) || 0),
@@ -283,7 +347,6 @@ export function useDataFetching({
               setObd([0, Math.ceil(dataMaxEnd), 1]);
               if (Number(endTime) > dataMaxEnd) setEndTime(Math.ceil(dataMaxEnd));
             } else if (dataMaxEnd > prevMax) {
-              // Never block exploration if we discover data extends beyond current max
               setObd([0, Math.ceil(dataMaxEnd), 1]);
             }
           }
@@ -303,10 +366,9 @@ export function useDataFetching({
     };
 
     loadData();
-  }, [startTime, endTime, bins, obd, localTraceText]);
+  }, [startTime, endTime, bins, obd, localTraceText, dataMapping]);
 
-  // Keep viewRange within fetched range; if user isn't zoomed (viewRange == previous fetch range),
-  // automatically track the full fetched window.
+  // Keep viewRange within fetched range
   useEffect(() => {
     const newFetch = { start: Number(startTime), end: Number(endTime) };
     const prevFetch = fetchRangeRef.current;
@@ -335,7 +397,7 @@ export function useDataFetching({
     fetchRangeRef.current = newFetch;
   }, [startTime, endTime, setViewRange, fetchRangeRef]);
 
-  // Drive imperative redraws from viewRange changes (zoom/pan) without refetching.
+  // Drive imperative redraws from viewRange changes
   useEffect(() => {
     viewRangeRef.current = { start: Number(viewRange.start), end: Number(viewRange.end) };
     if (typeof redrawRef.current === 'function') {

@@ -1,5 +1,5 @@
 import { CONFIG_INDEX, formatConfigIndexForPrompt, findMatchingConfigs } from './configIndex';
-import ganttConfigSpec from '../GANTT_CONFIG_SPEC.json';
+import ganttConfigSpec from '../config/GANTT_CONFIG_SPEC.json';
 
 /**
  * Config Agent
@@ -150,7 +150,7 @@ Common transform patterns:
 - Fork tree: { "type": "transform", "name": "forkTree", "params": { "includeUnspecified": true } }
 - Sort by: { "type": "transform", "name": "sortBy", "params": { "key": "stats.totalDurUs", "desc": true } }
 - Auto pack: { "type": "transform", "name": "autoPack" }
-- By level: { "type": "transform", "name": "byLevel" }
+- By field (any attribute): { "type": "transform", "name": "byField", "params": { "field": "eventAttrPath" } }
 
 ## Task
 Based on the user's request, output a config patch.

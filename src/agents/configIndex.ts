@@ -1,4 +1,4 @@
-import ganttConfigSpec from '../GANTT_CONFIG_SPEC.json';
+import ganttConfigSpec from '../config/GANTT_CONFIG_SPEC.json';
 import { ConfigSpec } from '../types/ganttConfig';
 
 /**
@@ -10,7 +10,7 @@ import { ConfigSpec } from '../types/ganttConfig';
 function extractKeywords(entry: any) {
   const words = new Set<string>();
 
-  // From path: "yAxis.processOrderRule" -> ["yaxis", "process", "order", "rule"]
+  // From path: "yAxis.hierarchy1OrderRule" -> ["yaxis", "hierarchy1", "order", "rule"]
   entry.path.split('.').forEach((segment: string) => {
     // Split camelCase
     const parts = segment.split(/(?=[A-Z])/);
@@ -68,11 +68,11 @@ function inferRelatedConcepts(entry: any) {
   if (path.includes('axis') || desc.includes('axis')) {
     concepts.push('y-axis', 'x-axis', 'scale', 'axis');
   }
-  if (path.includes('process') || desc.includes('process')) {
-    concepts.push('processes', 'pid', 'proc');
+  if (path.includes('hierarchy1') || path.includes('process') || desc.includes('process')) {
+    concepts.push('processes', 'pid', 'proc', 'hierarchy1', 'root');
   }
-  if (path.includes('thread') || desc.includes('thread')) {
-    concepts.push('threads', 'tid', 'threading');
+  if (path.includes('hierarchy2') || path.includes('thread') || desc.includes('thread')) {
+    concepts.push('threads', 'tid', 'threading', 'hierarchy2');
   }
   if (path.includes('height') || path.includes('width')) {
     concepts.push('size', 'dimension');

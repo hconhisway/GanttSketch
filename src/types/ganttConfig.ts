@@ -27,25 +27,25 @@ export interface LayoutConfig {
   laneHeight: number;
   lanePadding: number;
   expandedPadding: number;
-  threadGap: number;
+  hierarchy2Gap: number;
   yAxis: {
     autoWidth: boolean;
     baseWidth: number;
     minWidth: number;
     maxWidth: number;
-    processIndent: number;
-    labelPadding: { left: number; right: number; threadIndent: number };
-    processFont: string;
-    threadFont: string;
+    hierarchy1Indent: number;
+    labelPadding: { left: number; right: number; hierarchy2Indent: number };
+    hierarchy1Font: string;
+    hierarchy2Font: string;
   };
   label: { minBarLabelPx: number };
 }
 
 export interface YAxisConfig {
-  processOrderRule?: Rule;
-  threadLaneRule?: Rule;
-  processLabelRule?: Rule;
-  threadLabelRule?: Rule;
+  hierarchy1OrderRule?: Rule;
+  hierarchy2LaneRule?: Rule;
+  hierarchy1LabelRule?: Rule;
+  hierarchy2LabelRule?: Rule;
   orderMode?: string;
   includeUnspecified?: boolean;
   customOrder?: string[];
@@ -74,7 +74,7 @@ export interface TooltipField {
 
 export interface TooltipConfig {
   enabled?: boolean;
-  process?: { title?: string; fields?: TooltipField[] };
+  hierarchy1?: { title?: string; fields?: TooltipField[] };
   event?: {
     title?: string;
     fields?: TooltipField[];
@@ -89,10 +89,19 @@ export interface TooltipConfig {
   };
 }
 
+export type ProcessSortMode = 'default' | 'fork';
+
+export interface XAxisConfig {
+  /** Merge gap as fraction of time window (0–1). Gaps larger than this split hierarchy1 bars. Default 0.002. */
+  mergeGapRatio?: number;
+}
+
 export interface GanttConfig {
   layout: LayoutConfig;
+  xAxis?: XAxisConfig;
   yAxis: YAxisConfig;
   color: ColorConfig;
+  colorMapping?: any;
   tooltip: TooltipConfig;
   extensions: Record<string, any>;
 }
@@ -122,3 +131,59 @@ export interface ConfigSpec {
 }
 
 export type ConfigPatch = Record<string, any>;
+
+/**
+ * Universal data mapping that describes how arbitrary data fields
+ * map to every visual aspect of the Gantt chart.
+ * Produced by the data analysis agent and editable by the user.
+ */
+export interface GanttDataMapping {
+  /** Time axis (X): which fields represent event timing */
+  xAxis: {
+    startField: string | null;
+    endField: string | null;
+    durationField: string | null;
+    timeUnit: 'us' | 'ms' | 's' | 'ns';
+  };
+  /** Hierarchy1/hierarchy2 grouping (Y-axis rows) */
+  yAxis: {
+    hierarchy1Field: string | null;
+    hierarchy2Field: string | null;
+    parentField: string | null;
+    levelField: string | null;
+  };
+  /** Event identity and classification */
+  identity: {
+    nameField: string | null;
+    categoryField: string | null;
+    idField: string | null;
+  };
+  /** Color grouping */
+  color: {
+    keyField: string | null;
+  };
+  /** Text displayed on event bars */
+  barLabel: {
+    field: string | null;
+  };
+  /** Tooltip configuration: which data fields to show on hover */
+  tooltip: {
+    fields: Array<{
+      sourceField: string;
+      label: string;
+      format?: 'time' | 'duration' | 'none';
+    }>;
+    showArgs: boolean;
+    argsField: string | null;
+  };
+  /** Schema metadata discovered from the data */
+  schema: {
+    dataFormat: string;
+    allFields: Array<{
+      path: string;
+      type: string;
+      sampleValues?: any[];
+    }>;
+    notes: string;
+  };
+}

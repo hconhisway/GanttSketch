@@ -1,0 +1,554 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import './App.css';
+import { GANTT_CONFIG, cloneGanttConfig, applyGanttConfigPatch } from './config/ganttConfig';
+import { GANTT_CONFIG_UI_SPEC } from './config/ganttConfigUiSpec';
+import { cloneWidgetConfig } from './config/widgetConfig';
+import { dataMappingToFlatFieldMapping, dataMappingToLegacySchema } from './agents';
+import { parseMessageSegments } from './utils/configPatch';
+import { processTracksConfig } from './utils/dataProcessing';
+import { inferProcessSortModeFromRule } from './utils/processOrder';
+import { WidgetArea } from './components/widget/WidgetArea';
+import { GanttChart } from './components/chart/GanttChart';
+import { ConfigPanel } from './components/config/ConfigPanel';
+import { ChatMessages } from './components/chat/ChatMessages';
+import { ImageGallery } from './components/ImageGallery';
+import { ChatInput } from './components/chat/ChatInput';
+import { ConfigEditorModal } from './components/config/ConfigEditorModal';
+import { WidgetEditorModal } from './components/widget/WidgetEditorModal';
+import { LeftPanel } from './components/layout/LeftPanel';
+import { RightPanel } from './components/layout/RightPanel';
+import { useDataFetching } from './hooks/useDataFetching';
+import { useProcessAggregates } from './hooks/useProcessAggregates';
+import { useChatAgent } from './hooks/useChatAgent';
+import { useChartRenderer } from './hooks/useChartRenderer';
+import { useConfigEditor } from './hooks/useConfigEditor';
+import { useWidgetEditor } from './hooks/useWidgetEditor';
+import { useWidgetBindings } from './hooks/useWidgetBindings';
+import { useImageCapture } from './hooks/useImageCapture';
+
+// API configuration
+const API_URL = 'http://127.0.0.1:8080/get-events';
+const FRONTEND_TRACE_URL = `${process.env.PUBLIC_URL || ''}/unet3d_a100--verify-1.pfw`;
+const FRONTEND_TRACE_LABEL = 'unet3d_a100--verify-1.pfw';
+const DEFAULT_END_US = 100_000_000; // 100s, microseconds
+const MERGE_GAP_RATIO = 0.01; // merge gap as fraction of total time window
+
+function App() {
+  const chartRef = useRef();
+  const minimapRef = useRef();
+  const xAxisRef = useRef();
+  const yAxisRef = useRef();
+  const chatEndRef = useRef();
+  const drawingOverlayRef = useRef();
+  const widgetAreaRef = useRef(null);
+  const widgetHandlersRef = useRef([]);
+  const ganttConfigRef = useRef(null);
+  const tracksConfigRef = useRef(null);
+  const widgetApiRef = useRef(null);
+  const redrawRef = useRef(null);
+  const viewRangeRef = useRef({ start: 0, end: DEFAULT_END_US });
+  const fetchRangeRef = useRef({ start: 0, end: DEFAULT_END_US });
+  const forkRelationsRef = useRef({ parentByPid: new Map(), childrenByPid: new Map(), edges: [] });
+  const forkLoggedRef = useRef(false);
+  const [data, setData] = useState([]);
+  const [dataMapping, setDataMapping] = useState(null); // Universal data mapping (GanttDataMapping)
+  const [loading, setLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(false);
+  const [error, setError] = useState(null);
+  const [obd, setObd] = useState([0, DEFAULT_END_US, 1]); // [begin, end, bins]
+  const [startTime, setStartTime] = useState(0);
+  const [endTime, setEndTime] = useState(DEFAULT_END_US);
+  const [bins, setBins] = useState(1000);
+  const [viewRange, setViewRange] = useState({ start: 0, end: DEFAULT_END_US });
+  const [processAggregates, setProcessAggregates] = useState(new Map());
+  const [threadsByPid, setThreadsByPid] = useState(new Map());
+  const [expandedPids, setExpandedPids] = useState([]);
+  const [yAxisWidth, setYAxisWidth] = useState(GANTT_CONFIG?.layout?.yAxis?.baseWidth ?? 180);
+
+  // Chat state
+  const [messages, setMessages] = useState([]);
+  const [inputMessage, setInputMessage] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [currentStreamingMessage, setCurrentStreamingMessage] = useState('');
+
+  // Drawing state
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [brushSize, setBrushSize] = useState(3);
+  const [brushColor, setBrushColor] = useState('#ff0000');
+  const [ganttConfig, setGanttConfig] = useState(() => cloneGanttConfig());
+  const [processSortMode, setProcessSortMode] = useState(
+    inferProcessSortModeFromRule(GANTT_CONFIG.yAxis?.processOrderRule)
+  ); // 'fork' | 'default'
+  const [localTraceText, setLocalTraceText] = useState('');
+  const [localTraceName, setLocalTraceName] = useState('');
+  const [showUploadPrompt, setShowUploadPrompt] = useState(false);
+
+  // Image storage for LLM
+  const {
+    savedImages,
+    selectedImageId,
+    handleCaptureImage,
+    handleDeleteImage,
+    handleSelectImage
+  } = useImageCapture({
+    drawingOverlayRef,
+    setMessages
+  });
+
+  // Tracks configuration
+  const [tracksConfig, setTracksConfig] = useState({
+    sortMode: 'asc', // 'asc', 'desc', 'custom', 'grouped'
+    customSort: null,
+    groups: null,
+    filter: null,
+    trackList: null
+  });
+
+  const trackConfigResult = useMemo(
+    () => processTracksConfig(data, tracksConfig),
+    [data, tracksConfig]
+  );
+  const chartData = trackConfigResult.processedData;
+
+  // Derive backward-compat values from dataMapping for agents
+  const dataSchema = useMemo(
+    () => (dataMapping ? dataMappingToLegacySchema(dataMapping) : null),
+    [dataMapping]
+  );
+  const fieldMapping = useMemo(
+    () => (dataMapping ? dataMappingToFlatFieldMapping(dataMapping) : null),
+    [dataMapping]
+  );
+
+  // Build config panel spec: Data Mapping (single consolidated entry) + Gantt Config sections
+  const configSpec = useMemo(() => {
+    const dataMappingSection = {
+      id: 'dataMapping',
+      title: 'Data Mapping',
+      description: 'How data fields map to chart elements (auto-detected, editable)',
+      items: [
+        {
+          id: 'dataMapping',
+          label: 'Edit Data Mapping',
+          path: 'dataMapping',
+          description:
+            'Time axis, process/thread, identity, color, bar label, tooltip and schema. Edit the full mapping in one place.',
+          example: JSON.stringify(
+            {
+              xAxis: { startField: 'ts', endField: null, durationField: 'dur', timeUnit: 'us' },
+              yAxis: { processField: 'pid', threadField: 'tid', parentField: 'ppid', levelField: 'level' },
+              identity: { nameField: 'name', categoryField: 'cat', idField: 'id' },
+              color: { keyField: 'cat' },
+              barLabel: { field: 'name' },
+              tooltip: {
+                fields: [
+                  { sourceField: 'name', label: 'Name', format: 'none' },
+                  { sourceField: 'ts', label: 'Start', format: 'time' },
+                  { sourceField: 'dur', label: 'Duration', format: 'duration' }
+                ],
+                showArgs: true,
+                argsField: 'args'
+              },
+              schema: { dataFormat: '', allFields: [], notes: '' }
+            },
+            null,
+            2
+          ),
+          source: 'dataMapping'
+          // no mappingKey = edit entire dataMapping object
+        }
+      ]
+    };
+    return [dataMappingSection, ...GANTT_CONFIG_UI_SPEC];
+  }, [dataMapping]);
+
+  // Config UI editor state
+  const {
+    activeConfigItem,
+    configEditorText,
+    setConfigEditorText,
+    configEditorError,
+    configHighlightId,
+    configEditorTextareaRef,
+    handleOpenConfigEditor,
+    handleCloseConfigEditor,
+    handleSaveConfigEditor
+  } = useConfigEditor({
+    ganttConfig,
+    setGanttConfig,
+    setProcessSortMode,
+    setMessages,
+    dataMapping,
+    setDataMapping
+  });
+
+  // Widget configuration and instances
+  const [widgetConfig, setWidgetConfig] = useState(() => cloneWidgetConfig());
+  const [widgets, setWidgets] = useState([]);
+
+  // Widget agent mode toggle
+  const [isWidgetAgentMode, setIsWidgetAgentMode] = useState(false);
+
+  // Widget editor state (similar to config editor)
+  const {
+    activeWidget,
+    widgetEditorText,
+    setWidgetEditorText,
+    widgetEditorError,
+    widgetHighlightId,
+    handleOpenWidgetEditor,
+    handleCloseWidgetEditor,
+    handleSaveWidgetEditor,
+    handleDeleteWidget
+  } = useWidgetEditor({
+    setWidgets,
+    setMessages
+  });
+
+  useDataFetching({
+    obd,
+    startTime,
+    endTime,
+    bins,
+    localTraceText,
+    dataMapping,
+    ganttConfig,
+    apiUrl: API_URL,
+    traceUrl: FRONTEND_TRACE_URL,
+    defaultEndUs: DEFAULT_END_US,
+    setIsFetching,
+    setData,
+    setDataMapping,
+    setGanttConfig,
+    setProcessSortMode,
+    setMessages,
+    setObd,
+    setEndTime,
+    setError,
+    setShowUploadPrompt,
+    setLoading,
+    setViewRange,
+    fetchRangeRef,
+    viewRangeRef,
+    redrawRef,
+    viewRange,
+    forkRelationsRef,
+    forkLoggedRef
+  });
+
+  useProcessAggregates({
+    data: chartData,
+    obd,
+    startTime,
+    endTime,
+    mergeGapRatio: MERGE_GAP_RATIO,
+    threadLaneRule: ganttConfig?.yAxis?.threadLaneRule,
+    setThreadsByPid,
+    setProcessAggregates,
+    setExpandedPids,
+    threadsByPid,
+    processAggregates
+  });
+
+  useChartRenderer({
+    chartRef,
+    minimapRef,
+    xAxisRef,
+    yAxisRef,
+    viewRangeRef,
+    redrawRef,
+    chartData,
+    startTime,
+    endTime,
+    bins,
+    obd,
+    processAggregates,
+    threadsByPid,
+    expandedPids,
+    yAxisWidth,
+    processSortMode,
+    ganttConfig,
+    setYAxisWidth,
+    setExpandedPids,
+    setViewRange,
+    forkRelationsRef
+  });
+
+  useEffect(() => {
+    ganttConfigRef.current = ganttConfig;
+  }, [ganttConfig]);
+
+  useEffect(() => {
+    tracksConfigRef.current = tracksConfig;
+  }, [tracksConfig]);
+
+  useEffect(() => {
+    widgetApiRef.current = {
+      getGanttConfig: () => ganttConfigRef.current,
+      setGanttConfig,
+      applyGanttConfigPatch,
+      setProcessSortMode,
+      getTracksConfig: () => tracksConfigRef.current,
+      setTracksConfig,
+      setViewRange,
+      setYAxisWidth,
+      setIsDrawingMode,
+      setBrushSize,
+      setBrushColor
+    };
+  }, [
+    setGanttConfig,
+    setProcessSortMode,
+    setTracksConfig,
+    setViewRange,
+    setYAxisWidth,
+    setIsDrawingMode,
+    setBrushSize,
+    setBrushColor
+  ]);
+
+  useWidgetBindings({
+    widgets,
+    widgetAreaRef,
+    widgetApiRef,
+    widgetHandlersRef
+  });
+
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, currentStreamingMessage]);
+
+  useEffect(() => {
+    if (!configHighlightId || activeConfigItem?.id !== configHighlightId) return;
+    const textarea = configEditorTextareaRef.current;
+    if (!textarea) return;
+    const frame = requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [configHighlightId, activeConfigItem]);
+
+  useEffect(() => {
+    if (!configHighlightId) return;
+    const selector = `.config-button[data-config-item-id="${configHighlightId}"]`;
+    const button = document.querySelector(selector);
+    if (button) {
+      button.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [configHighlightId]);
+
+  // Handle clear drawings
+  const handleClear = useCallback(() => {
+    if (drawingOverlayRef.current) {
+      drawingOverlayRef.current.clearCanvas();
+    }
+  }, []);
+
+  const { handleSendMessage, handleKeyPress } = useChatAgent({
+    inputMessage,
+    isStreaming,
+    selectedImageId,
+    savedImages,
+    messages,
+    data,
+    ganttConfig,
+    startTime,
+    endTime,
+    activeConfigItem,
+    dataSchema,
+    fieldMapping,
+    isWidgetAgentMode,
+    widgetConfig,
+    widgets,
+    setMessages,
+    setInputMessage,
+    setIsStreaming,
+    setCurrentStreamingMessage,
+    setGanttConfig,
+    setProcessSortMode,
+    setTracksConfig,
+    setWidgets,
+    setWidgetConfig,
+    handleOpenConfigEditor,
+    handleOpenWidgetEditor
+  });
+
+  if (loading && (!data || data.length === 0)) {
+    return (
+      <div className="App">
+        <div className="loading">Loading events...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="App">
+        <div className="error">
+          <div
+            style={{
+              backgroundColor: '#fee',
+              border: '1px solid #fcc',
+              padding: '15px',
+              borderRadius: '4px',
+              color: '#c33',
+              textAlign: 'center',
+              fontFamily: 'system-ui'
+            }}
+          >
+            Error loading data: {error}
+            <br />
+            Start the API server at {API_URL}, place {FRONTEND_TRACE_LABEL} in the public folder, or
+            upload a trace file.
+          </div>
+        </div>
+        {showUploadPrompt && (
+          <div className="upload-row">
+            <label className="upload-label">
+              Upload trace file
+              <input
+                type="file"
+                accept=".pfw,.json,.txt"
+                onChange={(e) => {
+                  const file = e.target.files && e.target.files[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const text = String(reader.result || '');
+                    setLocalTraceText(text);
+                    setLocalTraceName(file.name || 'uploaded trace');
+                    setError(null);
+                    setShowUploadPrompt(false);
+                    setLoading(true);
+                    setIsFetching(true);
+                  };
+                  reader.onerror = () => {
+                    setError('Failed to read uploaded file.');
+                  };
+                  reader.readAsText(file);
+                }}
+              />
+            </label>
+            {localTraceName ? (
+              <span className="upload-hint">Using local file: {localTraceName}</span>
+            ) : (
+              <span className="upload-hint">
+                Used when backend and public trace are unavailable
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!obd) {
+    return (
+      <div className="App">
+        <div className="loading">Initializing...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="App">
+      <div className="main-content">
+        <LeftPanel>
+          <WidgetArea widgets={widgets} widgetConfig={widgetConfig} widgetAreaRef={widgetAreaRef} />
+          <GanttChart
+            chartRef={chartRef}
+            minimapRef={minimapRef}
+            xAxisRef={xAxisRef}
+            yAxisRef={yAxisRef}
+            drawingOverlayRef={drawingOverlayRef}
+            isDrawingMode={isDrawingMode}
+            brushSize={brushSize}
+            brushColor={brushColor}
+            yAxisWidth={yAxisWidth}
+          />
+        </LeftPanel>
+
+        <RightPanel>
+          <div className="chat-header">
+            <h3>Chart Assistant</h3>
+            <p className="chat-subtitle">Ask questions about your data</p>
+          </div>
+
+          <ConfigPanel
+            configSpec={configSpec}
+            activeConfigItem={activeConfigItem}
+            configHighlightId={configHighlightId}
+            onOpenConfigEditor={handleOpenConfigEditor}
+            widgets={widgets}
+            activeWidget={activeWidget}
+            widgetHighlightId={widgetHighlightId}
+            onOpenWidgetEditor={handleOpenWidgetEditor}
+          />
+
+          <ChatMessages
+            messages={messages}
+            isStreaming={isStreaming}
+            currentStreamingMessage={currentStreamingMessage}
+            chatEndRef={chatEndRef}
+            parseMessageSegments={parseMessageSegments}
+          />
+
+          <ImageGallery
+            savedImages={savedImages}
+            selectedImageId={selectedImageId}
+            onSelectImage={handleSelectImage}
+            onDeleteImage={handleDeleteImage}
+          />
+
+          <ChatInput
+            inputMessage={inputMessage}
+            setInputMessage={setInputMessage}
+            isStreaming={isStreaming}
+            onSend={handleSendMessage}
+            onKeyPress={handleKeyPress}
+            isWidgetAgentMode={isWidgetAgentMode}
+            setIsWidgetAgentMode={setIsWidgetAgentMode}
+            isDrawingMode={isDrawingMode}
+            setIsDrawingMode={setIsDrawingMode}
+            brushSize={brushSize}
+            setBrushSize={setBrushSize}
+            brushColor={brushColor}
+            setBrushColor={setBrushColor}
+            onClear={handleClear}
+            onCaptureImage={handleCaptureImage}
+            selectedImageId={selectedImageId}
+          />
+
+          <ConfigEditorModal
+            activeConfigItem={activeConfigItem}
+            configEditorText={configEditorText}
+            setConfigEditorText={setConfigEditorText}
+            configEditorError={configEditorError}
+            configHighlightId={configHighlightId}
+            configEditorTextareaRef={configEditorTextareaRef}
+            onSave={handleSaveConfigEditor}
+            onClose={handleCloseConfigEditor}
+          />
+
+          <WidgetEditorModal
+            activeWidget={activeWidget}
+            widgetEditorText={widgetEditorText}
+            setWidgetEditorText={setWidgetEditorText}
+            widgetEditorError={widgetEditorError}
+            widgetHighlightId={widgetHighlightId}
+            onSave={handleSaveWidgetEditor}
+            onDelete={handleDeleteWidget}
+            onClose={handleCloseWidgetEditor}
+          />
+        </RightPanel>
+      </div>
+    </div>
+  );
+}
+
+export default App;

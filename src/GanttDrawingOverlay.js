@@ -8,7 +8,7 @@ import React, {
 } from 'react';
 import './GanttDrawingOverlay.css';
 import { exportDOMToCanvas } from './ExportHelper';
-import { GANTT_CONFIG } from './ganttConfig';
+import { GANTT_CONFIG } from './config/ganttConfig';
 
 /**
  * Drawing controls component - displays inline with sliders

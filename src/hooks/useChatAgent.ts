@@ -1,11 +1,12 @@
 import { useCallback } from 'react';
-import { streamLLMResponse } from '../llmConfig';
-import { applyGanttConfigPatch } from '../ganttConfig';
-import { applyWidgetConfigPatch } from '../widgetConfig';
+import type { Dispatch, SetStateAction } from 'react';
+import { streamLLMResponse } from '../config/llmConfig';
+import { applyGanttConfigPatch } from '../config/ganttConfig';
+import { applyWidgetConfigPatch } from '../config/widgetConfig';
 import {
   parseTrackConfigFromResponse,
   convertLLMConfigToTracksConfig
-} from '../tracksConfigPrompt';
+} from '../config/tracksConfigPrompt';
 import { getWidgetSystemPrompt } from '../agents/widgetAgent';
 import { buildSystemPrompt, extractTargetPath } from '../agents';
 import { FLAT_CONFIG_ITEMS } from '../utils/configPatch';
@@ -14,7 +15,74 @@ import { buildPatchForPath, inferProcessSortModeFromRule } from '../utils/proces
 import { normalizeWidget, findConfigItemForPatch } from '../utils/widget';
 import { formatTimeUs } from '../utils/formatting';
 import { getValueAtPath } from '../utils/expression';
-import { validateWidget } from '../widgetValidator';
+import { validateWidget } from '../config/widgetValidator';
+import type { ProcessSortMode } from '../types/ganttConfig';
+
+const MAX_EVENT_PROMPT_CHARS = 1200;
+const MAX_ARRAY_PREVIEW = 20;
+const MAX_OBJECT_KEYS = 20;
+const MAX_STRING_CHARS = 200;
+
+function trimEventForPrompt(event: any): any {
+  if (event == null || typeof event !== 'object') return event;
+
+  const clipValue = (value: any): any => {
+    if (value == null) return value;
+    if (typeof value === 'string') {
+      return value.length > MAX_STRING_CHARS ? `${value.slice(0, MAX_STRING_CHARS)}...` : value;
+    }
+    if (Array.isArray(value)) {
+      if (value.length > MAX_ARRAY_PREVIEW) return `[${value.length} items]`;
+      return value.map((entry) =>
+        typeof entry === 'object' && entry !== null ? '[object]' : entry
+      );
+    }
+    if (typeof value === 'object') {
+      const keys = Object.keys(value);
+      if (keys.length > MAX_OBJECT_KEYS) return `[object ${keys.length} keys]`;
+      const preview: Record<string, any> = {};
+      keys.forEach((key) => {
+        const entry = (value as any)[key];
+        preview[key] = typeof entry === 'object' && entry !== null ? '[object]' : entry;
+      });
+      return preview;
+    }
+    return value;
+  };
+
+  const trimmed: Record<string, any> = {};
+  Object.keys(event).forEach((key) => {
+    trimmed[key] = clipValue((event as any)[key]);
+  });
+
+  const json = JSON.stringify(trimmed);
+  if (json.length <= MAX_EVENT_PROMPT_CHARS) return trimmed;
+
+  const preferredKeys = [
+    'name',
+    'cat',
+    'pid',
+    'tid',
+    'ts',
+    'dur',
+    'start',
+    'end',
+    'timestamp',
+    'type'
+  ];
+  const compact: Record<string, any> = {};
+  preferredKeys.forEach((key) => {
+    if (key in trimmed) compact[key] = trimmed[key];
+  });
+  if (Object.keys(compact).length === 0) {
+    Object.keys(trimmed)
+      .slice(0, 10)
+      .forEach((key) => {
+        compact[key] = trimmed[key];
+      });
+  }
+  return compact;
+}
 
 interface UseChatAgentArgs {
   inputMessage: string;
@@ -37,7 +105,7 @@ interface UseChatAgentArgs {
   setIsStreaming: (value: boolean) => void;
   setCurrentStreamingMessage: (value: string) => void;
   setGanttConfig: (value: any) => void;
-  setProcessSortMode: (value: string) => void;
+  setProcessSortMode: Dispatch<SetStateAction<ProcessSortMode>>;
   setTracksConfig: (value: any) => void;
   setWidgets: (updater: (prev: any[]) => any[]) => void;
   setWidgetConfig: (value: any) => void;
@@ -104,8 +172,8 @@ export function useChatAgent({
     // Prepare enhanced context about the current chart data for tracks configuration
     const uniqueTracks = [...new Set(data.map((d) => d.pid ?? d.tid ?? d.track))];
     const configSummary = [
-      `yAxis.processOrderRule=${ganttConfig?.yAxis?.processOrderRule?.name || 'pidAsc'}`,
-      `yAxis.threadLaneRule=${ganttConfig?.yAxis?.threadLaneRule?.name || 'autoPack'}`,
+      `yAxis.hierarchy1OrderRule=${ganttConfig?.yAxis?.hierarchy1OrderRule?.name || 'pidAsc'}`,
+      `yAxis.hierarchy2LaneRule=${ganttConfig?.yAxis?.hierarchy2LaneRule?.name || 'autoPack'}`,
       `color.keyRule=${ganttConfig?.color?.keyRule ? 'rule' : 'default'}`,
       `color.palette=${(ganttConfig?.color?.palette || []).length}`,
       `tooltip=${ganttConfig?.tooltip?.enabled === false ? 'off' : 'on'}`
@@ -132,7 +200,7 @@ export function useChatAgent({
 
     // Use widget agent mode toggle instead of regex detection
     const eventFields = extractEventFieldPaths(data, 80);
-    const sampleEvents = Array.isArray(data) ? data.slice(0, 5) : [];
+    const sampleEvents = Array.isArray(data) ? data.slice(0, 5).map(trimEventForPrompt) : [];
     console.log('[Config Agent] Event fields extracted:', eventFields);
     console.log('[Config Agent] Sample events:', sampleEvents.length);
     console.log('[Agent Mode] Widget agent mode:', isWidgetAgentMode);
@@ -204,9 +272,9 @@ export function useChatAgent({
               }
               const nextConfig = applyGanttConfigPatch(ganttConfig, patchToApply);
               setGanttConfig(nextConfig);
-              if (patchToApply?.yAxis?.processOrderRule) {
+              if (patchToApply?.yAxis?.hierarchy1OrderRule) {
                 setProcessSortMode(
-                  inferProcessSortModeFromRule(patchToApply.yAxis.processOrderRule)
+                  inferProcessSortModeFromRule(patchToApply.yAxis.hierarchy1OrderRule)
                 );
               } else if (patchToApply?.yAxis?.orderMode) {
                 const nextMode = patchToApply.yAxis.orderMode;

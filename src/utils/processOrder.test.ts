@@ -1,6 +1,7 @@
 import {
   applyProcessOrderRule,
   comparePid,
+  getThreadLaneFieldPath,
   inferProcessSortModeFromRule,
   normalizeProcessOrderRule,
   resolveThreadLaneMode
@@ -24,9 +25,25 @@ describe('process order utils', () => {
     });
   });
 
+  it('prefers hierarchy1OrderRule when present', () => {
+    const explicit = { type: 'transform', name: 'pidAsc' };
+    const rule = normalizeProcessOrderRule(
+      { hierarchy1OrderRule: explicit, orderMode: 'custom', customOrder: ['1'] },
+      'pidAsc'
+    );
+    expect(rule).toBe(explicit);
+  });
+
   it('infers sort and thread lane modes', () => {
     expect(inferProcessSortModeFromRule({ type: 'transform', name: 'forkTree' })).toBe('fork');
-    expect(resolveThreadLaneMode({ name: 'byLevel' }, 'auto')).toBe('level');
+    expect(resolveThreadLaneMode({ name: 'autoPack' })).toBe('auto');
+    expect(resolveThreadLaneMode({ name: 'byField', params: { field: 'cat' } })).toBe('level');
+    expect(resolveThreadLaneMode({ name: 'byLevel' })).toBe('level');
+    expect(getThreadLaneFieldPath({ name: 'byField', params: { field: 'args.depth' } })).toBe(
+      'args.depth'
+    );
+    expect(getThreadLaneFieldPath({ name: 'byField' })).toBe('level');
+    expect(getThreadLaneFieldPath({ name: 'autoPack' })).toBe('');
   });
 
   it('applies custom list ordering', () => {

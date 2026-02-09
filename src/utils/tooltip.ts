@@ -26,9 +26,9 @@ export function renderTooltipRows(fields: any[], ctx: any): string {
 export function buildTooltipHtml(hit: any, tooltipConfig: any, ctx: any): string {
   if (!tooltipConfig || tooltipConfig.enabled === false) return '';
   if (hit.area === 'process') {
-    const processConfig = tooltipConfig.process || {};
+    const processConfig = tooltipConfig.hierarchy1 ?? tooltipConfig.process ?? {};
     const rows = renderTooltipRows(processConfig.fields, ctx);
-    const title = processConfig.title ?? 'Process';
+    const title = processConfig.title ?? 'Row';
     return `
       <div class="tooltip-grid">
         <div class="tooltip-col">

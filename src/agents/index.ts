@@ -4,16 +4,18 @@
  * Exports all agents and utilities for the Gantt chart configuration system.
  */
 
-// Data Analysis Agent
+// Data Analysis Agent (v2 – universal mapping)
 export {
   analyzeAndInitialize,
-  detectSchemaWithLLM,
+  detectDataMappingWithLLM,
   generateInitialConfig,
-  buildFieldMapping,
-  createFieldMappingConfig,
+  createDefaultMapping,
+  dataMappingToFlatFieldMapping,
+  dataMappingToLegacySchema,
   processEventsMinimal,
   getFieldValue,
-  SCHEMA_DETECTION_PROMPT
+  getTimeMultiplier,
+  DATA_MAPPING_PROMPT
 } from './dataAnalysisAgent';
 
 // Config Agent

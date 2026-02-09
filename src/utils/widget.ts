@@ -1,15 +1,19 @@
 import { stripScriptTags } from './formatting';
-import { FLAT_CONFIG_ITEMS } from './configPatch';
+import { type ConfigItem, FLAT_CONFIG_ITEMS } from './configPatch';
 import { getValueAtPath } from './expression';
 
-export function findConfigItemForPatch(patch: any): any | null {
+type ConfigMatch = { item: ConfigItem; value: unknown };
+
+export function findConfigItemForPatch(patch: any): ConfigItem | null {
   if (!patch || typeof patch !== 'object') return null;
-  const matches = FLAT_CONFIG_ITEMS.map((item) => ({
+  const matches = FLAT_CONFIG_ITEMS.map((item: ConfigItem): ConfigMatch => ({
     item,
     value: getValueAtPath(patch, item.path)
-  })).filter((entry) => entry.value !== undefined);
+  })).filter((entry): entry is ConfigMatch => entry.value !== undefined);
   if (matches.length === 0) return null;
-  matches.sort((a, b) => b.item.path.split('.').length - a.item.path.split('.').length);
+  matches.sort(
+    (a, b) => b.item.path.split('.').length - a.item.path.split('.').length
+  );
   return matches[0].item;
 }
 
