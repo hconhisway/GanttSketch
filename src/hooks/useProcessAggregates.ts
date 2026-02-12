@@ -5,12 +5,14 @@ import {
   resolveThreadLaneMode,
   getThreadLaneFieldPath
 } from '../utils/processOrder';
+import {
+  getHierarchyKeysFromHierarchyValues,
+  getHierarchyValuesFromEvent
+} from '../utils/hierarchy';
 
 type ThreadLevelMap = Map<string | number, any[]>;
 type ThreadMap = Map<string, ThreadLevelMap>;
-type ThreadsByPid = Map<string, ThreadMap>;
-
-const LANE_KEY_NONE = '__none__';
+type ThreadsByHierarchy1 = Map<string, ThreadMap>;
 
 /** Try path first; if missing, try common alternates so one attribute name works across datasets */
 function getLaneKeyValue(ev: any, path: string): unknown {
@@ -33,12 +35,12 @@ interface UseProcessAggregatesArgs {
   obd: any;
   startTime: number;
   endTime: number;
-  mergeGapRatio: number;
+  mergeUtilGap: number;
   hierarchy2LaneRule?: any;
-  setThreadsByPid: (next: ThreadsByPid) => void;
+  setThreadsByHierarchy1: (next: ThreadsByHierarchy1) => void;
   setProcessAggregates: (next: Map<string, any[]>) => void;
-  setExpandedPids: Dispatch<SetStateAction<string[]>>;
-  threadsByPid: ThreadsByPid;
+  setExpandedHierarchy1Ids: Dispatch<SetStateAction<string[]>>;
+  threadsByHierarchy1: ThreadsByHierarchy1;
   processAggregates: Map<string, any[]>;
 }
 
@@ -47,12 +49,12 @@ export function useProcessAggregates({
   obd,
   startTime,
   endTime,
-  mergeGapRatio,
+  mergeUtilGap,
   hierarchy2LaneRule,
-  setThreadsByPid,
+  setThreadsByHierarchy1,
   setProcessAggregates,
-  setExpandedPids,
-  threadsByPid,
+  setExpandedHierarchy1Ids,
+  threadsByHierarchy1,
   processAggregates
 }: UseProcessAggregatesArgs) {
   const aggregates = useMemo(() => {
@@ -65,12 +67,17 @@ export function useProcessAggregates({
     const useFieldLanes = mode === 'level' && laneFieldPath.length > 0;
 
     const windowUs = Math.max(0, Number(endTime) - Number(startTime));
-    const mergeGapUs = windowUs * mergeGapRatio;
-    const threadMap: ThreadsByPid = new Map();
+    const mergeGapUs = windowUs * mergeUtilGap;
+    const threadMap: ThreadsByHierarchy1 = new Map();
 
     data.forEach((ev) => {
-      const pid = String(ev.pid ?? 'unknown');
-      const tid = String(ev.tid ?? pid);
+      const hierarchyAliases = getHierarchyKeysFromHierarchyValues(getHierarchyValuesFromEvent(ev));
+      const hierarchyValues = hierarchyAliases.hierarchyValues;
+      const hierarchy1 = String(hierarchyAliases.hierarchy1 ?? 'unknown');
+      const hierarchy2Path =
+        hierarchyValues.length > 1
+          ? hierarchyValues.slice(1).map((v: any) => String(v ?? '<N/A>')).join('|')
+          : String(hierarchyAliases.hierarchy2 ?? hierarchy1);
       const start = Number(ev.start);
       const end = Number(ev.end);
       if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
@@ -82,22 +89,22 @@ export function useProcessAggregates({
           laneKey =
             typeof raw === 'number' && Number.isFinite(raw) ? raw : String(raw);
         } else {
-          laneKey = LANE_KEY_NONE;
+          laneKey = '<N/A>';
         }
       } else {
         laneKey = 0;
       }
 
-      let tidMap = threadMap.get(pid);
-      if (!tidMap) {
-        tidMap = new Map();
-        threadMap.set(pid, tidMap);
+      let hierarchy2Map = threadMap.get(hierarchy1);
+      if (!hierarchy2Map) {
+        hierarchy2Map = new Map();
+        threadMap.set(hierarchy1, hierarchy2Map);
       }
 
-      let levelMap = tidMap.get(tid);
+      let levelMap = hierarchy2Map.get(hierarchy2Path);
       if (!levelMap) {
         levelMap = new Map();
-        tidMap.set(tid, levelMap);
+        hierarchy2Map.set(hierarchy2Path, levelMap);
       }
 
       let bucket = levelMap.get(laneKey);
@@ -109,8 +116,10 @@ export function useProcessAggregates({
       const levelForEvent = typeof laneKey === 'number' ? laneKey : (ev.level ?? 0);
       bucket.push({
         ...ev,
-        pid,
-        tid,
+        ...hierarchyAliases,
+        hierarchy1,
+        hierarchy2: hierarchy2Path,
+        hierarchyValues,
         level: levelForEvent,
         start,
         end,
@@ -119,8 +128,8 @@ export function useProcessAggregates({
     });
 
     // Sort events within each level
-    threadMap.forEach((tidMap: ThreadMap) => {
-      tidMap.forEach((levelMap: ThreadLevelMap) => {
+    threadMap.forEach((hierarchy2Map: ThreadMap) => {
+      hierarchy2Map.forEach((levelMap: ThreadLevelMap) => {
         levelMap.forEach((arr: any[]) => {
           arr.sort((a: any, b: any) => a.start - b.start);
         });
@@ -129,9 +138,9 @@ export function useProcessAggregates({
 
     // Build process aggregates by merging close/overlapping events across all threads
     const processMap: Map<string, any[]> = new Map();
-    threadMap.forEach((tidMap: ThreadMap, pid: string) => {
+    threadMap.forEach((hierarchy2Map: ThreadMap, hierarchy1: string) => {
       const all: any[] = [];
-      tidMap.forEach((levelMap: ThreadLevelMap) => {
+      hierarchy2Map.forEach((levelMap: ThreadLevelMap) => {
         levelMap.forEach((arr: any[]) => {
           if (!Array.isArray(arr) || arr.length === 0) return;
           for (const item of arr) {
@@ -156,21 +165,27 @@ export function useProcessAggregates({
           merged.push({ ...ev, count: ev.count ?? 1 });
         }
       });
-      processMap.set(pid, merged);
+      processMap.set(hierarchy1, merged);
     });
 
     return { threadMap, processMap };
-  }, [data, obd, startTime, endTime, mergeGapRatio, hierarchy2LaneRule]);
+  }, [data, obd, startTime, endTime, mergeUtilGap, hierarchy2LaneRule]);
 
   useEffect(() => {
-    setThreadsByPid(aggregates.threadMap);
+    setThreadsByHierarchy1(aggregates.threadMap);
     setProcessAggregates(aggregates.processMap);
-  }, [aggregates, setProcessAggregates, setThreadsByPid]);
+  }, [aggregates, setProcessAggregates, setThreadsByHierarchy1]);
 
-  // Drop expanded pids that no longer exist
+  // Drop expanded hierarchy1 ids that no longer exist
   useEffect(() => {
-    setExpandedPids((prev) =>
-      prev.filter((pid) => threadsByPid.has(pid) || processAggregates.has(pid))
-    );
-  }, [threadsByPid, processAggregates, setExpandedPids]);
+    setExpandedHierarchy1Ids((prev) => {
+      const topLevel = new Set<string>();
+      threadsByHierarchy1.forEach((_value, key) => topLevel.add(String(key)));
+      processAggregates.forEach((_value, key) => topLevel.add(String(key)));
+      return prev.filter((expandKey) => {
+        const root = String(expandKey).split('|')[0];
+        return topLevel.has(root);
+      });
+    });
+  }, [threadsByHierarchy1, processAggregates, setExpandedHierarchy1Ids]);
 }

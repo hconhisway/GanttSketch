@@ -2,7 +2,7 @@ import { GanttConfig } from '../types/ganttConfig';
 
 export const DEFAULT_GANTT_CONFIG: GanttConfig = {
   xAxis: {
-    mergeGapRatio: 0.002
+    timeFormat: 'short'
   },
   layout: {
     margin: { top: 24, right: 24, bottom: 24, left: 16 },
@@ -41,20 +41,17 @@ export const DEFAULT_GANTT_CONFIG: GanttConfig = {
         op: 'concat',
         args: [
           { op: 'if', args: [{ op: 'var', name: 'isExpanded' }, '▼ ', '▶ '] },
-          'Row ',
-          { op: 'var', name: 'pid' }
+          { op: 'var', name: 'hierarchy1Field' },
+          ': ',
+          { op: 'var', name: 'hierarchy1' }
         ]
       }
     },
     hierarchy2LabelRule: {
       type: 'expr',
       expr: {
-        op: 'if',
-        args: [
-          { op: 'var', name: 'isMainThread' },
-          'main',
-          { op: 'concat', args: ['L2 ', { op: 'var', name: 'tid' }] }
-        ]
+        op: 'concat',
+        args: [{ op: 'var', name: 'hierarchy2Field' }, ': ', { op: 'var', name: 'hierarchy2' }]
       }
     }
   },
@@ -86,8 +83,8 @@ export const DEFAULT_GANTT_CONFIG: GanttConfig = {
         args: [
           { op: 'get', path: 'event.cat' },
           { op: 'get', path: 'event.name' },
-          { op: 'get', path: 'event.pid' },
-          { op: 'get', path: 'event.tid' },
+          { op: 'get', path: 'event.hierarchy1' },
+          { op: 'get', path: 'event.hierarchy2' },
           { op: 'get', path: 'event.level' },
           { op: 'get', path: 'event.id' },
           { op: 'var', name: 'trackKey' }
@@ -110,7 +107,7 @@ export const DEFAULT_GANTT_CONFIG: GanttConfig = {
     hierarchy1: {
       title: 'Row',
       fields: [
-        { label: 'Row', value: { op: 'var', name: 'pid' } },
+        { label: 'Row', value: { op: 'var', name: 'hierarchy1' } },
         {
           label: 'Duration',
           value: { op: 'formatDurationUs', args: [{ op: 'var', name: 'durationUs' }] }
@@ -130,8 +127,8 @@ export const DEFAULT_GANTT_CONFIG: GanttConfig = {
           label: 'Duration',
           value: { op: 'formatDurationUs', args: [{ op: 'var', name: 'durationUs' }] }
         },
-        { label: 'Thread', value: { op: 'var', name: 'tid' } },
-        { label: 'Process', value: { op: 'var', name: 'pid' } },
+        { label: 'Thread', value: { op: 'var', name: 'hierarchy2' } },
+        { label: 'Process', value: { op: 'var', name: 'hierarchy1' } },
         { label: 'SQL ID', value: { op: 'var', name: 'sqlId' } }
       ],
       args: {
@@ -142,6 +139,23 @@ export const DEFAULT_GANTT_CONFIG: GanttConfig = {
       }
     }
   },
+  dependencies: {
+    maxEdges: 200
+  },
+  performance: {
+    showOverlay: false,
+    webglEnabled: false,
+    streamingEnabled: false,
+    streamingMaxReqPerSec: 1,
+    streamingBufferFactor: 0.5,
+    streamingSimulate: false,
+    hierarchy1LOD: {
+      mergeUtilGap: 0.002
+    },
+    hierarchy2LOD: {
+      pixelWindow: 1
+    }
+  },
   extensions: {}
 };
 
@@ -149,6 +163,99 @@ export const GANTT_CONFIG = DEFAULT_GANTT_CONFIG;
 
 export function cloneGanttConfig(): GanttConfig {
   return JSON.parse(JSON.stringify(DEFAULT_GANTT_CONFIG));
+}
+
+function isVarNode(node: any, name: string): boolean {
+  return Boolean(node && typeof node === 'object' && node.op === 'var' && node.name === name);
+}
+
+function buildDefaultHierarchy1LabelRule() {
+  return {
+    type: 'expr',
+    expr: {
+      op: 'concat',
+      args: [
+        { op: 'if', args: [{ op: 'var', name: 'isExpanded' }, '▼ ', '▶ '] },
+        { op: 'var', name: 'hierarchy1Field' },
+        ': ',
+        { op: 'var', name: 'hierarchy1' }
+      ]
+    }
+  };
+}
+
+function buildDefaultHierarchy2LabelRule() {
+  return {
+    type: 'expr',
+    expr: {
+      op: 'concat',
+      args: [{ op: 'var', name: 'hierarchy2Field' }, ': ', { op: 'var', name: 'hierarchy2' }]
+    }
+  };
+}
+
+function buildDefaultHierarchyLabelRule(level: number) {
+  if (level <= 1) return buildDefaultHierarchy1LabelRule();
+  return {
+    type: 'expr',
+    expr: {
+      op: 'concat',
+      args: [
+        { op: 'var', name: `hierarchy${level}Field` },
+        ': ',
+        { op: 'var', name: `hierarchy${level}` }
+      ]
+    }
+  };
+}
+
+function normalizeHierarchy1LabelRule(rule: any): any {
+  const expr = rule?.type === 'expr' ? rule.expr : rule;
+  if (!expr || typeof expr !== 'object' || expr.op !== 'concat' || !Array.isArray(expr.args)) {
+    return rule;
+  }
+  const args = expr.args;
+  const hasH1Field = args.some((a: any) => isVarNode(a, 'hierarchy1Field'));
+  const hasH1Value = args.some((a: any) => isVarNode(a, 'hierarchy1'));
+  const last = args[args.length - 1];
+  const endsWithColonString = typeof last === 'string' && /:\s*$/.test(last);
+  const colonAtTail = last === ': ';
+  // Fix malformed historical orders like:
+  // [if, var(hierarchy1), "pid: "] or [if, var(hierarchy1Field), var(hierarchy1), ": "]
+  if ((hasH1Value && endsWithColonString) || (hasH1Field && hasH1Value && colonAtTail)) {
+    return buildDefaultHierarchy1LabelRule();
+  }
+  return rule;
+}
+
+function normalizeHierarchy2LabelRule(rule: any): any {
+  const expr = rule?.type === 'expr' ? rule.expr : rule;
+  if (!expr || typeof expr !== 'object') return rule;
+  if (expr.op === 'if' && Array.isArray(expr.args)) {
+    const args = expr.args;
+    const hasMainThreadCond = isVarNode(args[0], 'isMainThread');
+    if (hasMainThreadCond) {
+      return buildDefaultHierarchy2LabelRule();
+    }
+  }
+  // Keep custom rules; only fix very specific malformed suffix forms if seen.
+  if (expr.op === 'concat' && Array.isArray(expr.args)) {
+    const args = expr.args;
+    const hasH2Field = args.some((a: any) => isVarNode(a, 'hierarchy2Field'));
+    const hasH2Value = args.some((a: any) => isVarNode(a, 'hierarchy2'));
+    const last = args[args.length - 1];
+    const colonAtTail = last === ': ';
+    if (hasH2Field && hasH2Value && colonAtTail) {
+      return buildDefaultHierarchy2LabelRule();
+    }
+    const idxField = args.findIndex((a: any) => isVarNode(a, 'hierarchy2Field'));
+    const idxValue = args.findIndex((a: any) => isVarNode(a, 'hierarchy2'));
+    const idxColon = args.findIndex((a: any) => a === ': ');
+    if (idxField >= 0 && idxValue >= 0 && idxColon >= 0 && !(idxField < idxColon && idxColon < idxValue)) {
+      return buildDefaultHierarchy2LabelRule();
+    }
+  }
+  return rule;
 }
 
 function getArrayItemKey(item: any): string {
@@ -250,6 +357,25 @@ export function normalizeGanttConfig(raw: any): GanttConfig {
     if (y.threadLaneRule != null && y.hierarchy2LaneRule == null) y.hierarchy2LaneRule = y.threadLaneRule;
     if (y.processLabelRule != null && y.hierarchy1LabelRule == null) y.hierarchy1LabelRule = y.processLabelRule;
     if (y.threadLabelRule != null && y.hierarchy2LabelRule == null) y.hierarchy2LabelRule = y.threadLabelRule;
+    y.hierarchy1LabelRule = normalizeHierarchy1LabelRule(y.hierarchy1LabelRule);
+    if (y.hierarchy2LabelRule != null) {
+      y.hierarchy2LabelRule = normalizeHierarchy2LabelRule(y.hierarchy2LabelRule);
+    }
+    if (y.hierarchy2Field != null && y.hierarchy2Field !== '' && y.hierarchy2LabelRule == null) {
+      y.hierarchy2LabelRule = buildDefaultHierarchy2LabelRule();
+    }
+    Object.keys(y).forEach((key) => {
+      const match = key.match(/^hierarchy(\d+)Field$/);
+      if (!match) return;
+      const level = Number(match[1]);
+      if (!Number.isFinite(level) || level < 3) return;
+      const fieldValue = (y as any)[key];
+      if (fieldValue == null || String(fieldValue).trim() === '') return;
+      const labelKey = `hierarchy${level}LabelRule`;
+      if ((y as any)[labelKey] == null) {
+        (y as any)[labelKey] = buildDefaultHierarchyLabelRule(level);
+      }
+    });
     c.yAxis = y;
   }
   if (c.layout && typeof c.layout === 'object') {
@@ -270,6 +396,13 @@ export function normalizeGanttConfig(raw: any): GanttConfig {
   if (c.tooltip && typeof c.tooltip === 'object' && c.tooltip.process != null && (c.tooltip as any).hierarchy1 == null) {
     c.tooltip = { ...c.tooltip, hierarchy1: (c.tooltip as any).process };
   }
+  const defaultPerf = DEFAULT_GANTT_CONFIG.performance || {};
+  const perf = c.performance && typeof c.performance === 'object' ? { ...c.performance } : {};
+  if (perf.streamingEnabled == null) perf.streamingEnabled = defaultPerf.streamingEnabled ?? false;
+  if (perf.streamingMaxReqPerSec == null) perf.streamingMaxReqPerSec = defaultPerf.streamingMaxReqPerSec ?? 1;
+  if (perf.streamingBufferFactor == null) perf.streamingBufferFactor = defaultPerf.streamingBufferFactor ?? 0.5;
+  if (perf.streamingSimulate == null) perf.streamingSimulate = defaultPerf.streamingSimulate ?? false;
+  c.performance = perf;
   return c as GanttConfig;
 }
 
@@ -317,15 +450,15 @@ Rules are JSON ASTs (no JavaScript). They are evaluated by a safe interpreter.
 
 ### Rule Context (available vars)
 - event: current event (for color/tooltip)
-- pid, tid, level, trackKey
+- hierarchy1, hierarchy2, level, trackKey
 - stats: per-hierarchy1 stats (count, totalDurUs, avgDurUs, maxDurUs, minStart, maxEnd)
 - isExpanded, isMainThread
 
 ## Data Format (normalized events)
 Each event is normalized to this shape before rules run:
 {
-  pid: "string",
-  tid: "string",
+  hierarchy1: "string",
+  hierarchy2: "string",
   ppid: "string | null",
   level: number,
   start: number, // microseconds
@@ -525,7 +658,7 @@ Example 6: Compact layout
 
 ## Data Attributes You Can Reference
 Each event can include:
-- id, name, cat, pid, tid, level
+- id, name, cat, hierarchy1, hierarchy2, level
 - start, end (microseconds)
 - args (object; use dot-paths like "args.phase")
 - raw / Raw (original payload, if present)

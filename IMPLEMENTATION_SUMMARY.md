@@ -2,7 +2,7 @@
 
 ## Overview
 
-A complete drawing and annotation module has been successfully implemented for the GanttSketch application. This module allows users to draw freehand annotations directly on top of the Gantt chart and export the annotated chart as a high-quality PNG image.
+A complete drawing and annotation module has been successfully implemented for the OSFAT application. This module allows users to draw freehand annotations directly on top of the Gantt chart and export the annotated chart as a high-quality PNG image.
 
 ## Files Created/Modified
 
@@ -480,7 +480,7 @@ The drawing module has been successfully implemented with:
 - ✅ No linter errors
 - ✅ Production-ready quality
 
-The module seamlessly integrates with the existing GanttSketch application and provides users with powerful annotation capabilities for their Gantt charts.
+The module seamlessly integrates with the existing OSFAT application and provides users with powerful annotation capabilities for their Gantt charts.
 
 ---
 

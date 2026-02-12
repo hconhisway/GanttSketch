@@ -2,7 +2,7 @@
 
 ## Mission Accomplished ✅
 
-A fully functional drawing and annotation module has been successfully implemented for the GanttSketch application. Users can now draw directly on the Gantt chart and export annotated screenshots!
+A fully functional drawing and annotation module has been successfully implemented for the OSFAT application. Users can now draw directly on the Gantt chart and export annotated screenshots!
 
 ---
 

@@ -27,6 +27,9 @@ export const ConfigEditorModal = React.memo(function ConfigEditorModal({
   if (!activeConfigItem) return null;
 
   const isDataMappingEditor = activeConfigItem?.source === 'dataMapping';
+  const guideText = isDataMappingEditor
+    ? 'Quick guide: edit valid JSON only. Save applies changes immediately. Use Export to download the current mapping.'
+    : 'Quick guide: edit valid JSON only. Save applies changes immediately.';
 
   return (
     <div className="config-editor-modal" role="dialog" aria-modal="true">
@@ -48,9 +51,7 @@ export const ConfigEditorModal = React.memo(function ConfigEditorModal({
           placeholder="the threshold for merging events on the top level, gaps larger than this_value * total time will be merged."
           rows={8}
         />
-        {activeConfigItem.example && (
-          <pre className="config-editor-example">{activeConfigItem.example}</pre>
-        )}
+        <div className="config-editor-guide">{guideText}</div>
         {configEditorError && <div className="config-editor-error">{configEditorError}</div>}
         <div className="config-editor-actions">
           <button type="button" className="config-editor-save" onClick={onSave}>

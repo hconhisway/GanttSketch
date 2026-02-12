@@ -5,6 +5,7 @@ import { GANTT_CONFIG_UI_SPEC } from './config/ganttConfigUiSpec';
 import { cloneWidgetConfig } from './config/widgetConfig';
 import {
   analyzeAndInitialize,
+  deriveConfigFromMapping,
   dataMappingToFlatFieldMapping,
   dataMappingToLegacySchema,
   getTimeMultiplier,
@@ -14,6 +15,11 @@ import { parseMessageSegments } from './utils/configPatch';
 import { processTracksConfig } from './utils/dataProcessing';
 import { inferProcessSortModeFromRule } from './utils/processOrder';
 import { buildConfigBundle, downloadConfigBundle } from './utils/configBundle';
+import {
+  getHierarchyFieldsFromMapping,
+  normalizeHierarchyFeatures,
+  pruneHierarchyConfig
+} from './utils/hierarchy';
 import { WidgetArea } from './components/widget/WidgetArea';
 import { GanttChart } from './components/chart/GanttChart';
 import { ConfigPanel } from './components/config/ConfigPanel';
@@ -25,6 +31,7 @@ import { DataSetupModal } from './components/config/DataSetupModal';
 import { WidgetEditorModal } from './components/widget/WidgetEditorModal';
 import { LeftPanel } from './components/layout/LeftPanel';
 import { RightPanel } from './components/layout/RightPanel';
+import { PerfOverlay } from './components/PerfOverlay';
 import { useDataFetching } from './hooks/useDataFetching';
 import { useProcessAggregates } from './hooks/useProcessAggregates';
 import { useChatAgent } from './hooks/useChatAgent';
@@ -37,17 +44,35 @@ import type { ChatMessage } from './types/chat';
 import type { NormalizedEvent, TracksConfig } from './types/data';
 import type { GanttConfig, GanttDataMapping, ProcessSortMode } from './types/ganttConfig';
 import type { Widget, WidgetConfig } from './types/widget';
+import type { ViewState } from './types/viewState';
+import type { SpanSoAChunkBundle } from './utils/soaBuffers';
+import { perfMetrics } from './utils/perfMetrics';
 
 type ViewRange = { start: number; end: number };
 type WidgetBinding = { element: Element; event: string; handler: EventListener };
 
 // API configuration
 const API_URL = 'http://127.0.0.1:8080/get-events';
+// const API_URL = 'http://127.0.0.1:8080/get-data-in-range';
 const FRONTEND_TRACE_URL = `${process.env.PUBLIC_URL || ''}/unet3d_a100--verify-1.pfw`;
 const FRONTEND_TRACE_LABEL = 'unet3d_a100--verify-1.pfw';
 const DEFAULT_END_US = 2e15; // Large enough for epoch-microsecond traces (~1.76e15 typical); 100_000_000 would filter out most events
 
 function App() {
+  const getInitialViewState = (): ViewState => ({
+    timeDomain: [0, DEFAULT_END_US],
+    viewportPxWidth: 0,
+    devicePixelRatio: typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+    pixelWindow: 1,
+    visibleLaneRange: [0, 0],
+    visibleLaneIds: [],
+    laneOrder: [],
+    filters: [],
+    scrollTop: 0,
+    selection: null,
+    expandedHierarchy1Ids: [],
+    lastInteractionAt: 0
+  });
   const chartRef = useRef<HTMLDivElement>(null!);
   const minimapRef = useRef<HTMLDivElement>(null!);
   const xAxisRef = useRef<HTMLDivElement>(null!);
@@ -60,11 +85,12 @@ function App() {
   const tracksConfigRef = useRef<TracksConfig | null>(null);
   const widgetApiRef = useRef<any>(null);
   const redrawRef = useRef<(() => void) | null>(null);
+  const viewStateRef = useRef<ViewState>(getInitialViewState());
   const viewRangeRef = useRef<ViewRange>({ start: 0, end: DEFAULT_END_US });
   const fetchRangeRef = useRef<ViewRange>({ start: 0, end: DEFAULT_END_US });
   const forkRelationsRef = useRef({
-    parentByPid: new Map<string, string | null>(),
-    childrenByPid: new Map<string, string[]>(),
+    parentByHierarchy1: new Map<string, string | null>(),
+    childrenByHierarchy1: new Map<string, string[]>(),
     edges: [] as any[]
   });
   const forkLoggedRef = useRef(false);
@@ -72,18 +98,78 @@ function App() {
   const [rawEvents, setRawEvents] = useState<any[] | null>(null);
   const [dataMapping, setDataMapping] = useState<GanttDataMapping | null>(null); // Universal data mapping
   const [loading, setLoading] = useState(true);
-  const [isFetching, setIsFetching] = useState(false);
+  const [, setIsFetching] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [obd, setObd] = useState<[number, number, number]>([0, DEFAULT_END_US, 1]); // [begin, end, bins]
-  const [startTime, setStartTime] = useState(0);
+  const [startTime] = useState(0);
   const [endTime, setEndTime] = useState(DEFAULT_END_US);
-  const [bins, setBins] = useState(1000);
-  const [viewRange, setViewRange] = useState<ViewRange>({ start: 0, end: DEFAULT_END_US });
+  const [bins] = useState(1000);
+  const [viewState, setViewState] = useState<ViewState>(getInitialViewState);
   const [processAggregates, setProcessAggregates] = useState<Map<string, any[]>>(new Map());
-  const [threadsByPid, setThreadsByPid] = useState<Map<string, any>>(new Map());
-  const [expandedPids, setExpandedPids] = useState<string[]>([]);
+  const [threadsByHierarchy1, setThreadsByHierarchy1] = useState<Map<string, any>>(new Map());
+  const [renderSoA, setRenderSoA] = useState<SpanSoAChunkBundle | null>(null);
+  const [isSoaPacking, setIsSoaPacking] = useState(false);
+  const [isMappingProcessing, setIsMappingProcessing] = useState(false);
   const [yAxisWidth, setYAxisWidth] = useState(GANTT_CONFIG?.layout?.yAxis?.baseWidth ?? 180);
+  const [ganttLoadingVisible, setGanttLoadingVisible] = useState(false);
+  const ganttLoadingStartRef = useRef<number | null>(null);
+  const ganttLoadingHideRef = useRef<number | null>(null);
+
+  const viewRange = useMemo(
+    () => ({ start: viewState.timeDomain[0], end: viewState.timeDomain[1] }),
+    [viewState.timeDomain]
+  );
+  const expandedHierarchy1Ids = viewState.expandedHierarchy1Ids;
+
+  const setViewStateSafe = useCallback(
+    (updater: React.SetStateAction<ViewState>) => {
+      setViewState((prev) => {
+        const base = viewStateRef.current || prev;
+        const next =
+          typeof updater === 'function'
+            ? (updater as (prevState: ViewState) => ViewState)(base)
+            : updater;
+        viewStateRef.current = next;
+        return next;
+      });
+    },
+    []
+  );
+
+  const setViewRange = useCallback(
+    (updater: React.SetStateAction<ViewRange>) => {
+      setViewStateSafe((prev) => {
+        const nextRange =
+          typeof updater === 'function'
+            ? (updater as (prevRange: ViewRange) => ViewRange)({
+                start: prev.timeDomain[0],
+                end: prev.timeDomain[1]
+              })
+            : updater;
+        const nextStart = Number(nextRange.start);
+        const nextEnd = Number(nextRange.end);
+        if (!Number.isFinite(nextStart) || !Number.isFinite(nextEnd)) return prev;
+        if (nextStart === prev.timeDomain[0] && nextEnd === prev.timeDomain[1]) return prev;
+        return { ...prev, timeDomain: [nextStart, nextEnd] };
+      });
+    },
+    [setViewStateSafe]
+  );
+
+  const setExpandedHierarchy1Ids = useCallback(
+    (updater: React.SetStateAction<string[]>) => {
+      setViewStateSafe((prev) => {
+        const nextExpanded =
+          typeof updater === 'function'
+            ? (updater as (prevList: string[]) => string[])(prev.expandedHierarchy1Ids)
+            : updater;
+        if (nextExpanded === prev.expandedHierarchy1Ids) return prev;
+        return { ...prev, expandedHierarchy1Ids: nextExpanded };
+      });
+    },
+    [setViewStateSafe]
+  );
 
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -96,6 +182,10 @@ function App() {
   const [brushSize, setBrushSize] = useState(3);
   const [brushColor, setBrushColor] = useState('#ff0000');
   const [ganttConfig, setGanttConfig] = useState<GanttConfig>(() => cloneGanttConfig());
+  useEffect(() => {
+    // One-time migration for malformed historical label rules in memory.
+    setGanttConfig((prev) => normalizeGanttConfig(prev));
+  }, []);
   const [processSortMode, setProcessSortMode] = useState<ProcessSortMode>(
     inferProcessSortModeFromRule(GANTT_CONFIG.yAxis?.hierarchy1OrderRule)
   ); // 'fork' | 'default'
@@ -130,6 +220,12 @@ function App() {
     [data, tracksConfig]
   );
   const chartData = trackConfigResult.processedData;
+  const hierarchyLevels = Math.max(1, Number(dataMapping?.features?.hierarchyLevels ?? 2));
+  const hierarchy1Lod = ganttConfig?.performance?.hierarchy1LOD;
+  const mergeUtilGap =
+    hierarchyLevels >= 1
+      ? Number(hierarchy1Lod?.mergeUtilGap ?? ganttConfig?.xAxis?.mergeGapRatio ?? 0.002)
+      : 0.002;
 
   // Derive backward-compat values from dataMapping for agents
   const dataSchema = useMemo(
@@ -153,11 +249,11 @@ function App() {
           label: 'Edit Data Mapping',
           path: 'dataMapping',
           description:
-            'Time axis, process/thread, identity, color, bar label, tooltip and schema. Edit the full mapping in one place.',
+            'Time axis, hierarchy, identity, color, bar label, tooltip, schema, and feature flags. Lane attribute selection is configured in ganttConfig.yAxis.hierarchy2LaneRule.',
           example: JSON.stringify(
             {
               xAxis: { startField: 'ts', endField: null, durationField: 'dur', timeUnit: 'us' },
-              yAxis: { hierarchy1Field: 'pid', hierarchy2Field: 'tid', parentField: 'ppid', levelField: 'level' },
+              yAxis: { hierarchyFields: ['pid', 'tid'], parentField: 'ppid' },
               identity: { nameField: 'name', categoryField: 'cat', idField: 'id' },
               color: { keyField: 'pid' },
               barLabel: { field: 'name' },
@@ -170,7 +266,17 @@ function App() {
                 showArgs: true,
                 argsField: 'args'
               },
-              schema: { dataFormat: '', allFields: [], notes: '' }
+              schema: { dataFormat: '', allFields: [], notes: '' },
+              features: {
+                hierarchyLevels: 2,
+                hierarchyFields: ['pid', 'tid'],
+                forkTree: true,
+                dependencyLines: false,
+                dependencyField: null,
+                lanePacking: 'autoPack',
+                flameChart: false,
+                colorStrategy: 'hierarchy1'
+              }
             },
             null,
             2
@@ -180,8 +286,206 @@ function App() {
         }
       ]
     };
-    return [dataMappingSection, ...GANTT_CONFIG_UI_SPEC];
+    const levelCount = Math.max(1, Number(dataMapping?.features?.hierarchyLevels ?? 2));
+    const yAxisDynamicItems: Array<{
+      id: string;
+      label: string;
+      path: string;
+      description: string;
+      example: string;
+    }> = [];
+    for (let level = 3; level <= levelCount; level += 1) {
+      yAxisDynamicItems.push(
+        {
+          id: `yAxis.hierarchy${level}Field`,
+          label: `Hierarchy ${level} Field`,
+          path: `yAxis.hierarchy${level}Field`,
+          description: 'Field path for this hierarchy level.',
+          example: `"hierarchy${level}"`
+        },
+        {
+          id: `yAxis.hierarchy${level}LaneRule`,
+          label: `Hierarchy ${level} Lane Rule`,
+          path: `yAxis.hierarchy${level}LaneRule`,
+          description: 'Lane arrangement rule for this hierarchy level.',
+          example: JSON.stringify({ type: 'transform', name: 'autoPack' }, null, 2)
+        },
+        {
+          id: `yAxis.hierarchy${level}LabelRule`,
+          label: `Hierarchy ${level} Label Rule`,
+          path: `yAxis.hierarchy${level}LabelRule`,
+          description: 'Label expression for this hierarchy level.',
+          example: JSON.stringify(
+            {
+              type: 'expr',
+              expr: {
+                op: 'concat',
+                args: [
+                  { op: 'var', name: `hierarchy${level}Field` },
+                  ': ',
+                  { op: 'var', name: `hierarchy${level}` }
+                ]
+              }
+            },
+            null,
+            2
+          )
+        }
+      );
+    }
+    const performanceItems: Array<{
+      id: string;
+      label: string;
+      path: string;
+      description: string;
+      example: string;
+    }> = [];
+    for (let level = 1; level <= levelCount; level += 1) {
+      if (level === 1) {
+        performanceItems.push({
+          id: 'performance.hierarchy1LOD.mergeUtilGap',
+          label: 'Hierarchy 1 LOD Merge Util Gap',
+          path: 'performance.hierarchy1LOD.mergeUtilGap',
+          description: 'Merge gap as fraction of time window for hierarchy 1 LOD.',
+          example: '0.002'
+        });
+      } else {
+        performanceItems.push({
+          id: `performance.hierarchy${level}LOD.pixelWindow`,
+          label: `Hierarchy ${level} LOD Pixel Window`,
+          path: `performance.hierarchy${level}LOD.pixelWindow`,
+          description: 'Pixel window size for this hierarchy LOD.',
+          example: '1'
+        });
+      }
+    }
+    const webglEnabledItem = {
+      id: 'performance.webglEnabled',
+      label: 'Enable WebGL',
+      path: 'performance.webglEnabled',
+      description: 'Enable WebGL rendering when available.',
+      example: 'true'
+    };
+    const showOverlayItem = {
+      id: 'performance.showOverlay',
+      label: 'Show Overlay',
+      path: 'performance.showOverlay',
+      description: 'Show performance overlay.',
+      example: 'false'
+    };
+    const streamingEnabledItem = {
+      id: 'performance.streamingEnabled',
+      label: 'Streaming Mode',
+      path: 'performance.streamingEnabled',
+      description: 'Enable viewport streaming fetch.',
+      example: 'false'
+    };
+    const streamingMaxReqItem = {
+      id: 'performance.streamingMaxReqPerSec',
+      label: 'Streaming Max Req/sec',
+      path: 'performance.streamingMaxReqPerSec',
+      description: 'Max streaming requests per second.',
+      example: '1'
+    };
+    const streamingBufferItem = {
+      id: 'performance.streamingBufferFactor',
+      label: 'Streaming Buffer Factor',
+      path: 'performance.streamingBufferFactor',
+      description: 'Buffer size as fraction of viewport span.',
+      example: '0.5'
+    };
+    const streamingSimulateItem = {
+      id: 'performance.streamingSimulate',
+      label: 'Streaming Simulate',
+      path: 'performance.streamingSimulate',
+      description: 'Simulate streaming using full data (debug).',
+      example: 'true'
+    };
+    const specWithPerformance = GANTT_CONFIG_UI_SPEC.map((section) => {
+      if (section.id === 'performance') {
+        return {
+          ...section,
+          items: [
+            ...performanceItems,
+            webglEnabledItem,
+            showOverlayItem,
+            streamingEnabledItem,
+            streamingMaxReqItem,
+            streamingBufferItem,
+            streamingSimulateItem
+          ]
+        };
+      }
+      if (section.id === 'yAxis' && yAxisDynamicItems.length > 0) {
+        return {
+          ...section,
+          items: [...section.items, ...yAxisDynamicItems]
+        };
+      }
+      return section;
+    });
+    return [dataMappingSection, ...specWithPerformance];
   }, [dataMapping]);
+
+  const updateTimeRangeFromEvents = useCallback(
+    (events: any[]) => {
+      if (!Array.isArray(events) || events.length === 0) return;
+      const dataMaxEnd = events.reduce(
+        (max: number, e: any) => Math.max(max, Number(e.end) || 0),
+        0
+      );
+      if (!Number.isFinite(dataMaxEnd) || dataMaxEnd <= 0) return;
+      const prevMax = Array.isArray(obd) ? Number(obd[1]) : DEFAULT_END_US;
+      const atCurrentMax = Number(endTime) >= prevMax;
+      if (atCurrentMax && Math.abs(dataMaxEnd - prevMax) > 1) {
+        setObd([0, Math.ceil(dataMaxEnd), 1]);
+        if (Number(endTime) > dataMaxEnd) setEndTime(Math.ceil(dataMaxEnd));
+      } else if (dataMaxEnd > prevMax) {
+        setObd([0, Math.ceil(dataMaxEnd), 1]);
+      }
+    },
+    [obd, endTime, setObd, setEndTime]
+  );
+
+  const applyMappingToRawEvents = useCallback(
+    async (mapping: GanttDataMapping) => {
+      if (!rawEvents || rawEvents.length === 0) return;
+      setIsMappingProcessing(true);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      try {
+        const flatMapping = dataMappingToFlatFieldMapping(mapping);
+        const hierarchyFields = getHierarchyFieldsFromMapping(mapping);
+        const timeMultiplier = getTimeMultiplier(mapping.xAxis.timeUnit);
+        const processed = processEventsMinimal(rawEvents, flatMapping, timeMultiplier, hierarchyFields);
+        setData(processed);
+        updateTimeRangeFromEvents(processed);
+
+        const derived = deriveConfigFromMapping(mapping);
+        if (derived && Object.keys(derived).length > 0) {
+          const hierarchyLevels = Math.max(
+            1,
+            Number(mapping?.features?.hierarchyLevels || hierarchyFields.length || 1)
+          );
+          const prunedBase = pruneHierarchyConfig(ganttConfig, hierarchyLevels);
+          const nextConfig = applyGanttConfigPatch(prunedBase, derived);
+          setGanttConfig(nextConfig);
+          if (derived?.yAxis?.hierarchy1OrderRule) {
+            setProcessSortMode(inferProcessSortModeFromRule(derived.yAxis.hierarchy1OrderRule));
+          }
+        }
+      } finally {
+        setIsMappingProcessing(false);
+      }
+    },
+    [
+      rawEvents,
+      setData,
+      updateTimeRangeFromEvents,
+      ganttConfig,
+      setGanttConfig,
+      setProcessSortMode
+    ]
+  );
 
   // Config UI editor state
   const {
@@ -201,7 +505,8 @@ function App() {
     setProcessSortMode,
     setMessages,
     dataMapping,
-    setDataMapping
+    setDataMapping,
+    onApplyDataMapping: applyMappingToRawEvents
   });
 
   // Widget configuration and instances
@@ -227,7 +532,7 @@ function App() {
     setMessages
   });
 
-  useDataFetching({
+  const { streamingStats } = useDataFetching({
     obd,
     startTime,
     endTime,
@@ -235,12 +540,16 @@ function App() {
     localTraceText,
     dataMapping,
     ganttConfig,
+    viewStateRef,
     apiUrl: API_URL,
     traceUrl: FRONTEND_TRACE_URL,
     defaultEndUs: DEFAULT_END_US,
     setIsFetching,
     setData,
     setRawEvents,
+    setRenderSoA,
+    setIsSoaPacking,
+    setIsMappingProcessing,
     setDataMapping,
     setGanttConfig,
     setProcessSortMode,
@@ -261,41 +570,57 @@ function App() {
     autoAnalyzeOnFirstLoad: false
   });
 
+  const handleToggleStreaming = useCallback(
+    (enabled: boolean) => {
+      setGanttConfig((prev) =>
+        applyGanttConfigPatch(prev, {
+          performance: { streamingEnabled: enabled }
+        })
+      );
+    },
+    [setGanttConfig]
+  );
+
   const showDataSetupModal = Boolean(
     rawEvents && rawEvents.length > 0 && !dataMapping
   );
+  const showGanttLoading = isAnalyzing || isSoaPacking || isMappingProcessing;
+  const GANTT_LOADING_MIN_MS = 350;
+  const ganttLoadingLabel = 'Loading...';
+  const streamingEnabled = ganttConfig?.performance?.streamingEnabled === true;
+  const streamingSimulated =
+    streamingEnabled && ganttConfig?.performance?.streamingSimulate === true;
 
-  const updateTimeRangeFromEvents = useCallback(
-    (events: any[]) => {
-      if (!Array.isArray(events) || events.length === 0) return;
-      const dataMaxEnd = events.reduce(
-        (max: number, e: any) => Math.max(max, Number(e.end) || 0),
-        0
-      );
-      if (!Number.isFinite(dataMaxEnd) || dataMaxEnd <= 0) return;
-      const prevMax = Array.isArray(obd) ? Number(obd[1]) : DEFAULT_END_US;
-      const atCurrentMax = Number(endTime) >= prevMax;
-      if (atCurrentMax && Math.abs(dataMaxEnd - prevMax) > 1) {
-        setObd([0, Math.ceil(dataMaxEnd), 1]);
-        if (Number(endTime) > dataMaxEnd) setEndTime(Math.ceil(dataMaxEnd));
-      } else if (dataMaxEnd > prevMax) {
-        setObd([0, Math.ceil(dataMaxEnd), 1]);
+  useEffect(() => {
+    if (showGanttLoading) {
+      ganttLoadingStartRef.current = performance.now();
+      if (ganttLoadingHideRef.current) {
+        window.clearTimeout(ganttLoadingHideRef.current);
+        ganttLoadingHideRef.current = null;
       }
-    },
-    [obd, endTime, setObd, setEndTime]
-  );
+      setGanttLoadingVisible(true);
+      return;
+    }
 
-  const applyMappingToRawEvents = useCallback(
-    (mapping: GanttDataMapping) => {
-      if (!rawEvents || rawEvents.length === 0) return;
-      const flatMapping = dataMappingToFlatFieldMapping(mapping);
-      const timeMultiplier = getTimeMultiplier(mapping.xAxis.timeUnit);
-      const processed = processEventsMinimal(rawEvents, flatMapping, timeMultiplier);
-      setData(processed);
-      updateTimeRangeFromEvents(processed);
-    },
-    [rawEvents, setData, updateTimeRangeFromEvents]
-  );
+    if (!ganttLoadingVisible) return;
+    const startedAt = ganttLoadingStartRef.current ?? performance.now();
+    const elapsed = performance.now() - startedAt;
+    const remaining = Math.max(0, GANTT_LOADING_MIN_MS - elapsed);
+    if (ganttLoadingHideRef.current) {
+      window.clearTimeout(ganttLoadingHideRef.current);
+    }
+    ganttLoadingHideRef.current = window.setTimeout(() => {
+      setGanttLoadingVisible(false);
+      ganttLoadingHideRef.current = null;
+    }, remaining);
+    return () => {
+      if (ganttLoadingHideRef.current) {
+        window.clearTimeout(ganttLoadingHideRef.current);
+        ganttLoadingHideRef.current = null;
+      }
+    };
+  }, [showGanttLoading, ganttLoadingVisible]);
+
 
   const handleRunDataAnalysis = useCallback(async () => {
     if (!rawEvents || rawEvents.length === 0) {
@@ -326,9 +651,11 @@ function App() {
       }
 
       try {
+        // Bundle stores only the dataMapping (including features).
+        // Config is derived deterministically from the mapping at load time.
         const bundle = buildConfigBundle(
           analysisResult.dataMapping,
-          analysisResult.config,
+          undefined,
           localTraceName || FRONTEND_TRACE_LABEL
         );
         downloadConfigBundle(bundle);
@@ -380,8 +707,9 @@ function App() {
           throw new Error('Missing dataMapping in the config file.');
         }
 
-        setDataMapping(mapping as GanttDataMapping);
-        applyMappingToRawEvents(mapping as GanttDataMapping);
+        const typedMapping = normalizeHierarchyFeatures(mapping as GanttDataMapping);
+        setDataMapping(typedMapping);
+        await applyMappingToRawEvents(typedMapping);
 
         if (parsed?.ganttConfig) {
           setGanttConfig(normalizeGanttConfig(parsed.ganttConfig));
@@ -393,6 +721,16 @@ function App() {
             setProcessSortMode(
               inferProcessSortModeFromRule(parsed.ganttConfigPatch.yAxis?.hierarchy1OrderRule ?? parsed.ganttConfigPatch.yAxis?.processOrderRule)
             );
+          }
+        } else if (typedMapping.features) {
+          // No explicit ganttConfig in the bundle — derive from mapping features
+          const derived = deriveConfigFromMapping(typedMapping);
+          if (derived && Object.keys(derived).length > 0) {
+            const nextConfig = applyGanttConfigPatch(ganttConfig, derived);
+            setGanttConfig(nextConfig);
+            if (derived.yAxis?.hierarchy1OrderRule) {
+              setProcessSortMode(inferProcessSortModeFromRule(derived.yAxis.hierarchy1OrderRule));
+            }
           }
         }
 
@@ -423,12 +761,12 @@ function App() {
     obd,
     startTime,
     endTime,
-    mergeGapRatio: ganttConfig?.xAxis?.mergeGapRatio ?? 0.002,
+    mergeUtilGap,
     hierarchy2LaneRule: ganttConfig?.yAxis?.hierarchy2LaneRule,
-    setThreadsByPid,
+    setThreadsByHierarchy1,
     setProcessAggregates,
-    setExpandedPids,
-    threadsByPid,
+    setExpandedHierarchy1Ids,
+    threadsByHierarchy1,
     processAggregates
   });
 
@@ -438,27 +776,37 @@ function App() {
     xAxisRef,
     yAxisRef,
     viewRangeRef,
+    viewStateRef,
     redrawRef,
+    renderSoA,
+    isSoaPacking,
     chartData,
     startTime,
     endTime,
     bins,
     obd,
     processAggregates,
-    threadsByPid,
-    expandedPids,
+    threadsByHierarchy1,
+    expandedHierarchy1Ids,
     yAxisWidth,
     processSortMode,
     ganttConfig,
+    dataMapping,
     setYAxisWidth,
-    setExpandedPids,
+    setExpandedHierarchy1Ids,
     setViewRange,
+    setViewState: setViewStateSafe,
     forkRelationsRef
   });
 
   useEffect(() => {
     ganttConfigRef.current = ganttConfig;
   }, [ganttConfig]);
+
+  useEffect(() => {
+    const globalAny = window as any;
+    globalAny.__ganttPerfMetrics = perfMetrics;
+  }, []);
 
   useEffect(() => {
     tracksConfigRef.current = tracksConfig;
@@ -512,7 +860,7 @@ function App() {
       textarea.select();
     });
     return () => cancelAnimationFrame(frame);
-  }, [configHighlightId, activeConfigItem]);
+  }, [configHighlightId, activeConfigItem, configEditorTextareaRef]);
 
   useEffect(() => {
     if (!configHighlightId) return;
@@ -638,6 +986,13 @@ function App() {
 
   return (
     <div className="App">
+      <PerfOverlay
+        visible={Boolean(ganttConfig?.performance?.showOverlay)}
+        streamingEnabled={streamingEnabled}
+        streamingSimulated={streamingSimulated}
+        streamingStats={streamingStats}
+        onToggleStreaming={handleToggleStreaming}
+      />
       <DataSetupModal
         open={showDataSetupModal}
         eventCount={rawEvents?.length ?? 0}
@@ -658,6 +1013,8 @@ function App() {
             brushSize={brushSize}
             brushColor={brushColor}
             yAxisWidth={yAxisWidth}
+            isBusy={ganttLoadingVisible}
+            busyLabel={ganttLoadingLabel}
           />
         </LeftPanel>
 

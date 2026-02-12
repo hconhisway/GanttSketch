@@ -11,6 +11,8 @@ interface GanttChartProps {
   brushSize: number;
   brushColor: string;
   yAxisWidth: number;
+  isBusy?: boolean;
+  busyLabel?: string;
 }
 
 export const GanttChart = React.memo(function GanttChart({
@@ -22,7 +24,9 @@ export const GanttChart = React.memo(function GanttChart({
   isDrawingMode,
   brushSize,
   brushColor,
-  yAxisWidth
+  yAxisWidth,
+  isBusy = false,
+  busyLabel = 'Loading...'
 }: GanttChartProps) {
   return (
     <div
@@ -46,6 +50,11 @@ export const GanttChart = React.memo(function GanttChart({
         brushSize={brushSize}
         brushColor={brushColor}
       />
+      {isBusy && (
+        <div className="gantt-busy-overlay" role="status" aria-live="polite">
+          <div className="gantt-busy-label">{busyLabel}</div>
+        </div>
+      )}
     </div>
   );
 });

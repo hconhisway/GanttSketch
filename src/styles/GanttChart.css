@@ -11,6 +11,30 @@
   flex-direction: column;
 }
 
+.gantt-busy-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  z-index: 40;
+  pointer-events: all;
+  cursor: progress;
+}
+
+.gantt-busy-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #4b5563;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
 .chart {
   position: relative;
   flex: 1;

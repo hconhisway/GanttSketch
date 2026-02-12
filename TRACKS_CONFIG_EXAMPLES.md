@@ -1,6 +1,6 @@
 # Advanced Track Configuration Examples
 
-This document provides advanced examples for configuring tracks in GanttSketch.
+This document provides advanced examples for configuring tracks in OSFAT.
 
 ## Example 1: Range-Based Filtering
 

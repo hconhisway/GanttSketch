@@ -1,3 +1,5 @@
+import { getHierarchyKeysFromHierarchyValues, getHierarchyValuesFromEvent } from './hierarchy';
+
 export function extractEventFieldPaths(events: any[], maxFields = 60): string[] {
   if (!Array.isArray(events) || events.length === 0) return [];
   const sample = events.slice(0, 50);
@@ -22,14 +24,18 @@ export function buildProcessStats(events: any[]): Map<string, any> {
   const stats = new Map<string, any>();
   if (!Array.isArray(events)) return stats;
   events.forEach((ev) => {
-    const pid = ev?.pid;
-    if (pid === undefined || pid === null) return;
-    const key = String(pid);
+    const hierarchy1 =
+      ev?.hierarchy1 ??
+      (Array.isArray(ev?.hierarchyValues) && ev.hierarchyValues.length > 0
+        ? ev.hierarchyValues[0]
+        : undefined);
+    if (hierarchy1 === undefined || hierarchy1 === null) return;
+    const key = String(hierarchy1);
     const start = Number(ev.start ?? ev.timeStart ?? 0);
     const end = Number(ev.end ?? ev.timeEnd ?? 0);
     const duration = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : 0;
     const entry = stats.get(key) || {
-      pid: key,
+      hierarchy1: key,
       count: 0,
       totalDurUs: 0,
       maxDurUs: 0,
@@ -50,14 +56,45 @@ export function buildProcessStats(events: any[]): Map<string, any> {
   return stats;
 }
 
+export interface FetchViewportOptions {
+  signal?: AbortSignal;
+  lanes?: string[];
+  viewportPxWidth?: number;
+  pixelWindow?: number;
+  summary?: number;
+  filters?: any[];
+}
+
 export async function fetchData(
   begin: number,
   end: number,
   bins: number,
-  apiUrl: string
+  apiUrl: string,
+  options: FetchViewportOptions = {}
 ): Promise<any> {
   try {
-    const response = await fetch(`${apiUrl}?begin=${begin}&end=${end}`);
+    const params = new URLSearchParams();
+    params.set('begin', String(begin));
+    params.set('end', String(end));
+    if (Number.isFinite(Number(bins))) params.set('bins', String(bins));
+    if (Number.isFinite(Number(options.viewportPxWidth))) {
+      params.set('viewportPxWidth', String(options.viewportPxWidth));
+    }
+    if (Number.isFinite(Number(options.pixelWindow))) {
+      params.set('pixelWindow', String(options.pixelWindow));
+    }
+    if (Number.isFinite(Number(options.summary))) {
+      params.set('summary', String(options.summary));
+    }
+    if (Array.isArray(options.lanes) && options.lanes.length > 0) {
+      params.set('lanes', options.lanes.join(','));
+    }
+    if (Array.isArray(options.filters) && options.filters.length > 0) {
+      params.set('filters', JSON.stringify(options.filters));
+    }
+    const response = await fetch(`${apiUrl}?${params.toString()}`, {
+      signal: options.signal
+    });
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -69,6 +106,61 @@ export async function fetchData(
     console.error('Error fetching data:', error);
     throw error;
   }
+}
+
+const getEventTimeBounds = (event: any): [number, number] => {
+  const startCandidate =
+    event?.start ??
+    event?.timeStart ??
+    event?.enter?.Timestamp ??
+    event?.Timestamp ??
+    event?.ts;
+  const durCandidate = event?.dur ?? event?.duration ?? event?.timeDur ?? 0;
+  const endCandidate =
+    event?.end ??
+    event?.timeEnd ??
+    event?.leave?.Timestamp ??
+    (startCandidate !== undefined ? Number(startCandidate) + Number(durCandidate) : undefined);
+
+  const start = Number(startCandidate);
+  let end = Number(endCandidate);
+  if (!Number.isFinite(start)) return [0, 0];
+  if (!Number.isFinite(end) || end <= start) {
+    end = start + Math.max(1, Number(durCandidate) || 1);
+  }
+  return [start, end];
+};
+
+export function simulateStreamingFetch(
+  fullData: any[],
+  request: { timeWindow: [number, number]; laneIds: string[]; summaryLevel: number }
+): { events: any[]; metadata: any } {
+  const [t0, t1] = request.timeWindow;
+  const laneSet = new Set((request.laneIds || []).map((lane) => String(lane)));
+  const useLaneFilter = laneSet.size > 0;
+
+  const events = (Array.isArray(fullData) ? fullData : []).filter((event) => {
+    const [start, end] = getEventTimeBounds(event);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
+    if (end < t0 || start > t1) return false;
+    if (!useLaneFilter) return true;
+
+    const hierarchyValues = getHierarchyValuesFromEvent(event);
+    const hierarchy1 = hierarchyValues[0] ?? '';
+    const hierarchyPath = hierarchyValues.slice(1).join('|');
+    const track = String(event?.track ?? '');
+    return laneSet.has(hierarchy1) || (hierarchyPath && laneSet.has(hierarchyPath)) || (track && laneSet.has(track));
+  });
+
+  return {
+    events,
+    metadata: {
+      begin: t0,
+      end: t1,
+      count: events.length,
+      summary: request.summaryLevel
+    }
+  };
 }
 
 export function parseFrontendTraceText(text: string): any[] {
@@ -110,8 +202,11 @@ export function buildFrontendPayloadFromText(text: string): {
   return { events, metadata: { count: events.length, source: 'frontend' } };
 }
 
-export async function fetchFrontendData(traceUrl: string): Promise<any> {
-  const response = await fetch(traceUrl, { cache: 'no-store' });
+export async function fetchFrontendData(
+  traceUrl: string,
+  options: FetchViewportOptions = {}
+): Promise<any> {
+  const response = await fetch(traceUrl, { cache: 'no-store', signal: options.signal });
   if (!response.ok) {
     throw new Error(`Frontend trace not found (${response.status}) at ${traceUrl}`);
   }
@@ -130,7 +225,8 @@ export async function fetchDataWithFallback(
   bins: number,
   apiUrl: string,
   traceUrl: string,
-  localTraceText: string
+  localTraceText: string,
+  options: FetchViewportOptions = {}
 ): Promise<any> {
   if (localTraceText) {
     try {
@@ -142,11 +238,11 @@ export async function fetchDataWithFallback(
   }
 
   try {
-    return await fetchData(begin, end, bins, apiUrl);
+    return await fetchData(begin, end, bins, apiUrl, options);
   } catch (backendError: any) {
     console.warn('[data] backend unavailable, falling back to frontend trace:', backendError);
     try {
-      return await fetchFrontendData(traceUrl);
+      return await fetchFrontendData(traceUrl, options);
     } catch (fallbackError: any) {
       const backendMsg = backendError?.message || 'unknown backend error';
       const fallbackMsg = fallbackError?.message || 'unknown frontend error';
@@ -160,7 +256,7 @@ export async function fetchDataWithFallback(
 }
 
 export function extractForkFieldsFromRawEvent(ev: any): {
-  pid: string;
+  hierarchy1: string;
   ppid: string | null;
   name: string;
   args: any;
@@ -187,9 +283,10 @@ export function extractForkFieldsFromRawEvent(ev: any): {
     raw?.Primitive ??
     '';
 
-  const pidValue =
+  const hierarchy1Value =
     raw?.pid ??
     ev?.pid ??
+    ev?.hierarchy1 ??
     raw?.PID ??
     ev?.PID ??
     args?.pid ??
@@ -212,34 +309,34 @@ export function extractForkFieldsFromRawEvent(ev: any): {
     args?.parent_process_id ??
     null;
 
-  const pid = pidValue === undefined || pidValue === null ? '' : String(pidValue);
+  const hierarchy1 = hierarchy1Value === undefined || hierarchy1Value === null ? '' : String(hierarchy1Value);
   const ppid = ppidValue === undefined || ppidValue === null ? null : String(ppidValue);
   const name = String(nameValue ?? '');
 
-  return { pid, ppid, name, args, raw };
+  return { hierarchy1, ppid, name, args, raw };
 }
 
 export function buildProcessForkRelationsFromRawEvents(rawEvents: any[]): {
-  parentByPid: Map<string, string>;
-  childrenByPid: Map<string, string[]>;
-  edges: { ppid: string; pid: string }[];
-  conflicts: { pid: string; ppidExisting: string; ppidNew: string }[];
+  parentByHierarchy1: Map<string, string>;
+  childrenByHierarchy1: Map<string, string[]>;
+  edges: { parentHierarchy1: string; hierarchy1: string }[];
+  conflicts: { hierarchy1: string; parentHierarchy1Existing: string; parentHierarchy1New: string }[];
   startEventCount: number;
   missingPpidCount: number;
-  missingPidCount: number;
+  missingHierarchy1Count: number;
   debug: {
     startContainsCount: number;
     startNameExamples: string[];
     ppidSourceHits: Record<string, number>;
   };
 } {
-  const parentByPid = new Map<string, string>(); // pid -> ppid
-  const childrenByPid = new Map<string, string[]>(); // ppid -> [pid...]
-  const edges: { ppid: string; pid: string }[] = []; // [{ ppid, pid }]
-  const conflicts: { pid: string; ppidExisting: string; ppidNew: string }[] = [];
+  const parentByHierarchy1 = new Map<string, string>(); // hierarchy1 -> parentHierarchy1
+  const childrenByHierarchy1 = new Map<string, string[]>(); // parentHierarchy1 -> [hierarchy1...]
+  const edges: { parentHierarchy1: string; hierarchy1: string }[] = [];
+  const conflicts: { hierarchy1: string; parentHierarchy1Existing: string; parentHierarchy1New: string }[] = [];
   let startEventCount = 0;
   let missingPpidCount = 0;
-  let missingPidCount = 0;
+  let missingHierarchy1Count = 0;
   let startContainsCount = 0;
   const startNameExamples: string[] = [];
   const ppidSourceHits: Record<string, number> = {
@@ -253,19 +350,19 @@ export function buildProcessForkRelationsFromRawEvents(rawEvents: any[]): {
 
   if (!Array.isArray(rawEvents)) {
     return {
-      parentByPid,
-      childrenByPid,
+      parentByHierarchy1,
+      childrenByHierarchy1,
       edges,
       conflicts,
       startEventCount,
       missingPpidCount,
-      missingPidCount,
+      missingHierarchy1Count,
       debug: { startContainsCount, startNameExamples, ppidSourceHits }
     };
   }
 
   for (const ev of rawEvents) {
-    const { pid, ppid, name, args, raw } = extractForkFieldsFromRawEvent(ev);
+    const { hierarchy1, ppid, name, args, raw } = extractForkFieldsFromRawEvent(ev);
     const nameLower = String(name || '').toLowerCase();
 
     if (nameLower.includes('start') && nameLower !== 'start') {
@@ -278,8 +375,8 @@ export function buildProcessForkRelationsFromRawEvents(rawEvents: any[]): {
     if (nameLower !== 'start') continue;
     startEventCount += 1;
 
-    if (!pid) {
-      missingPidCount += 1;
+    if (!hierarchy1) {
+      missingHierarchy1Count += 1;
       continue;
     }
 
@@ -297,52 +394,52 @@ export function buildProcessForkRelationsFromRawEvents(rawEvents: any[]): {
       missingPpidCount += 1;
       continue;
     }
-    if (pid === ppid) continue;
+    if (hierarchy1 === ppid) continue;
 
-    if (parentByPid.has(pid)) {
-      const existing = parentByPid.get(pid) ?? '';
+    if (parentByHierarchy1.has(hierarchy1)) {
+      const existing = parentByHierarchy1.get(hierarchy1) ?? '';
       if (existing !== ppid) {
-        conflicts.push({ pid, ppidExisting: existing, ppidNew: ppid });
+        conflicts.push({ hierarchy1, parentHierarchy1Existing: existing, parentHierarchy1New: ppid });
       }
       continue;
     }
 
-    parentByPid.set(pid, ppid);
-    edges.push({ ppid, pid });
+    parentByHierarchy1.set(hierarchy1, ppid);
+    edges.push({ parentHierarchy1: ppid, hierarchy1 });
 
-    if (!childrenByPid.has(ppid)) childrenByPid.set(ppid, []);
-    childrenByPid.get(ppid)!.push(pid);
+    if (!childrenByHierarchy1.has(ppid)) childrenByHierarchy1.set(ppid, []);
+    childrenByHierarchy1.get(ppid)!.push(hierarchy1);
   }
 
   return {
-    parentByPid,
-    childrenByPid,
+    parentByHierarchy1,
+    childrenByHierarchy1,
     edges,
     conflicts,
     startEventCount,
     missingPpidCount,
-    missingPidCount,
+    missingHierarchy1Count,
     debug: { startContainsCount, startNameExamples, ppidSourceHits }
   };
 }
 
 export function buildProcessForkRelations(events: any[]): {
-  parentByPid: Map<string, string>;
-  childrenByPid: Map<string, string[]>;
-  edges: { ppid: string; pid: string }[];
-  conflicts: { pid: string; ppidExisting: string; ppidNew: string }[];
+  parentByHierarchy1: Map<string, string>;
+  childrenByHierarchy1: Map<string, string[]>;
+  edges: { parentHierarchy1: string; hierarchy1: string }[];
+  conflicts: { hierarchy1: string; parentHierarchy1Existing: string; parentHierarchy1New: string }[];
   startEventCount: number;
   missingPpidCount: number;
 } {
-  const parentByPid = new Map<string, string>(); // pid -> ppid
-  const childrenByPid = new Map<string, string[]>(); // ppid -> [pid...]
-  const edges: { ppid: string; pid: string }[] = []; // [{ ppid, pid }]
-  const conflicts: { pid: string; ppidExisting: string; ppidNew: string }[] = [];
+  const parentByHierarchy1 = new Map<string, string>();
+  const childrenByHierarchy1 = new Map<string, string[]>();
+  const edges: { parentHierarchy1: string; hierarchy1: string }[] = [];
+  const conflicts: { hierarchy1: string; parentHierarchy1Existing: string; parentHierarchy1New: string }[] = [];
   let startEventCount = 0;
   let missingPpidCount = 0;
 
   if (!Array.isArray(events)) {
-    return { parentByPid, childrenByPid, edges, conflicts, startEventCount, missingPpidCount };
+    return { parentByHierarchy1, childrenByHierarchy1, edges, conflicts, startEventCount, missingPpidCount };
   }
 
   for (const ev of events) {
@@ -350,33 +447,33 @@ export function buildProcessForkRelations(events: any[]): {
     if (!ev || nameLower !== 'start') continue;
     startEventCount += 1;
 
-    const pid = ev.pid === undefined || ev.pid === null ? '' : String(ev.pid);
-    if (!pid) continue;
+    const hierarchy1 = ev.hierarchy1 === undefined || ev.hierarchy1 === null ? '' : String(ev.hierarchy1);
+    if (!hierarchy1) continue;
 
     const ppidValue = ev.ppid ?? ev.args?.ppid ?? ev.args?.PPID;
     if (ppidValue === undefined || ppidValue === null) {
       missingPpidCount += 1;
       continue;
     }
-    const ppid = String(ppidValue);
-    if (!ppid || pid === ppid) continue;
+    const parentHierarchy1 = String(ppidValue);
+    if (!parentHierarchy1 || hierarchy1 === parentHierarchy1) continue;
 
-    if (parentByPid.has(pid)) {
-      const existing = parentByPid.get(pid) ?? '';
-      if (existing !== ppid) {
-        conflicts.push({ pid, ppidExisting: existing, ppidNew: ppid });
+    if (parentByHierarchy1.has(hierarchy1)) {
+      const existing = parentByHierarchy1.get(hierarchy1) ?? '';
+      if (existing !== parentHierarchy1) {
+        conflicts.push({ hierarchy1, parentHierarchy1Existing: existing, parentHierarchy1New: parentHierarchy1 });
       }
       continue;
     }
 
-    parentByPid.set(pid, ppid);
-    edges.push({ ppid, pid });
+    parentByHierarchy1.set(hierarchy1, parentHierarchy1);
+    edges.push({ parentHierarchy1, hierarchy1 });
 
-    if (!childrenByPid.has(ppid)) childrenByPid.set(ppid, []);
-    childrenByPid.get(ppid)!.push(pid);
+    if (!childrenByHierarchy1.has(parentHierarchy1)) childrenByHierarchy1.set(parentHierarchy1, []);
+    childrenByHierarchy1.get(parentHierarchy1)!.push(hierarchy1);
   }
 
-  return { parentByPid, childrenByPid, edges, conflicts, startEventCount, missingPpidCount };
+  return { parentByHierarchy1, childrenByHierarchy1, edges, conflicts, startEventCount, missingPpidCount };
 }
 
 export function transformData(rawData: any): any[] {
@@ -388,8 +485,15 @@ export function transformData(rawData: any): any[] {
       .map((ev: any) => {
         const raw = ev.Raw ?? ev.raw ?? ev;
         const args = raw.args ?? ev.args ?? {};
-        const pid = raw.pid ?? ev.pid ?? ev.Location ?? 'unknown';
-        const tid = raw.tid ?? ev.tid ?? pid;
+        const h1 = raw.pid ?? ev.pid ?? ev.hierarchy1 ?? ev.Location ?? 'unknown';
+        const h2 = raw.tid ?? ev.tid ?? ev.hierarchy2 ?? h1;
+        const hierarchyValues = getHierarchyValuesFromEvent({
+          ...raw,
+          ...ev,
+          hierarchy1: h1,
+          hierarchy2: h2
+        });
+        const hierarchyAliases = getHierarchyKeysFromHierarchyValues(hierarchyValues);
         const ppidValue = raw.ppid ?? ev.ppid ?? args.ppid ?? args.PPID;
         const ppid = ppidValue === undefined || ppidValue === null ? null : String(ppidValue);
         const levelRaw = args.level ?? raw.level ?? ev.level ?? 0;
@@ -420,8 +524,9 @@ export function transformData(rawData: any): any[] {
           ...raw, // Preserve all original fields (ts, dur, etc.)
           ...ev, // Preserve wrapper fields if any
           // Internal fields for chart rendering (these override if they exist in original)
-          pid: String(pid),
-          tid: String(tid),
+          kind: 'raw',
+          ...hierarchyAliases,
+          hierarchyValues: hierarchyAliases.hierarchyValues,
           ppid,
           level,
           start, // microseconds
@@ -461,8 +566,15 @@ export function transformData(rawData: any): any[] {
 
     const events: any[] = [];
     rawData.data.forEach((item: any) => {
-      const pid = item.pid ?? item.process ?? item.track ?? 'unknown';
-      const tid = item.tid ?? item.thread ?? item.track ?? pid;
+      const hierarchy1 = item.hierarchy1 ?? item.pid ?? item.process ?? item.track ?? 'unknown';
+      const hierarchy2 = item.hierarchy2 ?? item.tid ?? item.thread ?? item.track ?? hierarchy1;
+      const hierarchyAliases = getHierarchyKeysFromHierarchyValues(
+        getHierarchyValuesFromEvent({
+          ...item,
+          hierarchy1,
+          hierarchy2
+        })
+      );
       const level = Number.isFinite(Number(item.level)) ? Number(item.level) : 0;
       const utils = item.utils || [];
 
@@ -472,12 +584,13 @@ export function transformData(rawData: any): any[] {
         const start = metaBegin + binIndex * binDuration;
         const end = start + binDuration;
         events.push({
-          pid: String(pid),
-          tid: String(tid),
+          kind: 'raw',
+          ...hierarchyAliases,
+          hierarchyValues: hierarchyAliases.hierarchyValues,
           level,
           start,
           end,
-          id: `${pid}-${binIndex}`,
+          id: `${hierarchy1}-${binIndex}`,
           name: 'util',
           cat: 'util',
           args: { util: utilFloat }
@@ -507,7 +620,20 @@ export function processTracksConfig(
     trackList = null
   } = config;
 
-  const getTrackKey = (item: any) => String(item?.track ?? item?.pid ?? item?.tid ?? 'unknown');
+  const getTrackKey = (item: any) => {
+    const hierarchyPath =
+      Array.isArray(item?.hierarchyValues) && item.hierarchyValues.length > 0
+        ? item.hierarchyValues.map((value: any) => String(value ?? '')).filter(Boolean).join('|')
+        : '';
+    const fallbackHierarchyTrack =
+      hierarchyPath ||
+      item?.hierarchy1 ||
+      item?.hierarchy2 ||
+      item?.pid ||
+      item?.tid ||
+      'unknown';
+    return String(item?.track ?? fallbackHierarchyTrack);
+  };
 
   // Get unique tracks from data
   let uniqueTracks = [...new Set(data.map(getTrackKey))];

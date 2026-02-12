@@ -1,4 +1,4 @@
-# GanttSketch
+# OSFAT
 
 A React application featuring an interactive Gantt chart built with Observable Plot, with an integrated LLM-powered chat assistant to help analyze and understand your data.
 
@@ -181,7 +181,7 @@ The application will open in your browser at `http://localhost:3000` or `http://
 ## Project Structure
 
 ```
-GanttSketch/
+OSFAT/
 ├── public/
 │   └── index.html
 ├── src/

@@ -16,9 +16,9 @@ describe('data processing utils', () => {
 
   it('builds process stats from events', () => {
     const stats = buildProcessStats([
-      { pid: 1, start: 0, end: 10 },
-      { pid: 1, start: 10, end: 25 },
-      { pid: 2, start: 5, end: 15 }
+      { hierarchy1: '1', start: 0, end: 10 },
+      { hierarchy1: '1', start: 10, end: 25 },
+      { hierarchy1: '2', start: 5, end: 15 }
     ]);
     expect(stats.get('1')?.count).toBe(2);
     expect(stats.get('1')?.maxDurUs).toBe(15);
@@ -34,15 +34,15 @@ describe('data processing utils', () => {
   it('extracts fork fields and builds fork relations', () => {
     const ev = { name: 'start', pid: 2, ppid: 1, args: { foo: 'bar' } };
     const fields = extractForkFieldsFromRawEvent(ev);
-    expect(fields.pid).toBe('2');
+    expect(fields.hierarchy1).toBe('2');
     expect(fields.ppid).toBe('1');
 
     const relations = buildProcessForkRelationsFromRawEvents([
       { name: 'start', pid: 2, ppid: 1 },
       { name: 'start', pid: 3, ppid: 1 }
     ]);
-    expect(relations.parentByPid.get('2')).toBe('1');
-    expect(relations.childrenByPid.get('1')).toEqual(['2', '3']);
+    expect(relations.parentByHierarchy1.get('2')).toBe('1');
+    expect(relations.childrenByHierarchy1.get('1')).toEqual(['2', '3']);
     expect(relations.startEventCount).toBe(2);
   });
 });

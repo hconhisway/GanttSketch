@@ -1,5 +1,14 @@
 import { streamLLMResponse } from '../config/llmConfig';
 import type { GanttDataMapping } from '../types/ganttConfig';
+import {
+  buildHierarchyValues,
+  getHierarchyFieldVarName,
+  getHierarchyFieldsFromMapping,
+  getHierarchyLodKey,
+  getHierarchyVarName,
+  getHierarchyKeysFromHierarchyValues,
+  normalizeHierarchyFeatures
+} from '../utils/hierarchy';
 
 /**
  * Data Analysis Agent (v2)
@@ -18,12 +27,13 @@ Given sample events from an arbitrary dataset, figure out how to map each field 
 
 A Gantt chart needs:
 1. **X-Axis (Time)**: Each event needs a start time, and either an end time or a duration.
-2. **Y-Axis (Rows)**: Events are grouped into rows by a hierarchy1 field, optionally sub-grouped by hierarchy2.
+2. **Y-Axis (Rows)**: Events are grouped into rows by hierarchy fields (e.g. process → thread).
 3. **Event Identity**: Each event has a name/label, and optionally a category and unique ID.
 4. **Color**: Events are colored by a grouping field (category, name, type, etc.).
 5. **Bar Label**: Text shown on each event bar (usually the event name).
 6. **Tooltip**: Fields shown when hovering over an event.
 7. **Metadata**: An object field containing extra arguments/properties.
+8. **Features**: Intelligent defaults — hierarchy depth, fork tree, dependency lines, packing, etc.
 
 ## Sample Events
 {sampleEvents}
@@ -49,6 +59,19 @@ For tooltip fields, include the most informative fields with appropriate format 
 
 For allFields in schema, list ALL fields found in the data (including nested paths like "args.phase").
 
+### Features section
+The "features" object captures high-level chart behavior that the renderer derives from.
+Analyze the data carefully and set each flag:
+- **hierarchyLevels**: How many grouping levels are present? (1 = flat list, 2 = group+subgroup, etc.)
+- **hierarchyFields**: Array of field paths, one per level, ordered from outermost to innermost.
+  Must have length == hierarchyLevels. e.g. ["pid", "tid"] for 2 levels.
+- **forkTree**: true if there is a parent-child relationship between hierarchy1 rows (a parentField exists).
+- **dependencyLines**: true if events have fields linking to predecessor/successor events (causal chains, flow IDs). Currently reserved for future use.
+- **dependencyField**: The field path used for dependency, or null.
+- **lanePacking**: How events in the same sub-row should be packed: "autoPack" (overlap-free bin packing, default), "stack" (one event per row, stacked), or "flat" (single row).
+- **flameChart**: true if events have a level/depth field indicating nested call stacks.
+- **colorStrategy**: Best color grouping for this data: "category", "hierarchy1", "name", or "field".
+
 Output JSON:
 \`\`\`json
 {
@@ -59,10 +82,8 @@ Output JSON:
     "timeUnit": "us"
   },
   "yAxis": {
-    "hierarchy1Field": "field for hierarchy1/root rows",
-    "hierarchy2Field": "field for hierarchy2 sub-group, or null",
-    "parentField": "field for parent process (fork tree), or null",
-    "levelField": "field for nesting depth, or null"
+    "hierarchyFields": ["outermost hierarchy field", "next hierarchy field"],
+    "parentField": "field for parent process (fork tree), or null"
   },
   "identity": {
     "nameField": "field for event name/label",
@@ -93,6 +114,16 @@ Output JSON:
       { "path": "fieldName", "type": "string|number|boolean|object|array" }
     ],
     "notes": "observations about the data"
+  },
+  "features": {
+    "hierarchyLevels": 2,
+    "hierarchyFields": ["pid", "tid"],
+    "forkTree": true,
+    "dependencyLines": false,
+    "dependencyField": null,
+    "lanePacking": "autoPack",
+    "flameChart": false,
+    "colorStrategy": "category"
   }
 }
 \`\`\`
@@ -103,7 +134,13 @@ Guidelines:
 - Include ALL fields you find in schema.allFields (flatten nested objects with dot paths)
 - For tooltip, include at least: name, start time, duration, hierarchy1 key, hierarchy2 key (when available)
 - For color.keyField, prefer hierarchy1 if available, then category, then name
-- ALWAYS provide timeUnit based on timestamp value magnitude analysis`;
+- ALWAYS provide timeUnit based on timestamp value magnitude analysis
+- Set features.hierarchyLevels to match how many distinct grouping levels the data has
+- Set features.hierarchyFields to list the field for each level (outermost first)
+- Also set yAxis.hierarchyFields to the same ordered list
+- Set features.forkTree = true only when a meaningful parent field exists
+- Set features.flameChart = true when a depth/level field is present and events nest within a thread
+- Set features.colorStrategy based on what makes the most visual sense for this data`;
 
 // ────────────────────────────────────────────────────────────────
 // Helpers
@@ -196,13 +233,19 @@ export function getTimeMultiplier(timeUnit: string): number {
 // Backward-compatibility conversion helpers
 // ────────────────────────────────────────────────────────────────
 
-/** Extract flat { pid, tid, start, ... } mapping from GanttDataMapping */
+/** Extract flat { hierarchy1Field, hierarchy2Field, start, ... } mapping from GanttDataMapping */
 export function dataMappingToFlatFieldMapping(
   mapping: GanttDataMapping
 ): Record<string, string | null> {
-  return {
-    pid: mapping.yAxis.hierarchy1Field || 'pid',
-    tid: mapping.yAxis.hierarchy2Field || mapping.yAxis.hierarchy1Field || 'tid',
+  const hierarchyFields = getHierarchyFieldsFromMapping(mapping);
+  const dynamicHierarchyFields = hierarchyFields.length > 0 ? hierarchyFields : ['hierarchy1', 'hierarchy2'];
+
+  const flatMapping: Record<string, string | null> = {
+    hierarchy1Field: dynamicHierarchyFields[0] || 'hierarchy1',
+    hierarchy2Field:
+      dynamicHierarchyFields[1] ||
+      dynamicHierarchyFields[0] ||
+      'hierarchy2',
     ppid: mapping.yAxis.parentField || null,
     start: mapping.xAxis.startField || 'ts',
     end: mapping.xAxis.endField || null,
@@ -210,21 +253,28 @@ export function dataMappingToFlatFieldMapping(
     name: mapping.identity.nameField || 'name',
     cat: mapping.identity.categoryField || null,
     args: mapping.tooltip.argsField || 'args',
-    level: mapping.yAxis.levelField || 'level',
+    level: null,
     id: mapping.identity.idField || null
   };
+
+  dynamicHierarchyFields.forEach((field, index) => {
+    if (!field) return;
+    flatMapping[`hierarchy${index + 1}Field`] = field;
+  });
+
+  return flatMapping;
 }
 
 /** Build legacy schema format for agent backward compatibility */
 export function dataMappingToLegacySchema(mapping: GanttDataMapping) {
   const fieldToSemantic: Record<string, string> = {};
+  const hierarchyFields = getHierarchyFieldsFromMapping(mapping);
   if (mapping.xAxis.startField) fieldToSemantic[mapping.xAxis.startField] = 'start_time';
   if (mapping.xAxis.endField) fieldToSemantic[mapping.xAxis.endField] = 'end_time';
   if (mapping.xAxis.durationField) fieldToSemantic[mapping.xAxis.durationField] = 'duration';
-  if (mapping.yAxis.hierarchy1Field) fieldToSemantic[mapping.yAxis.hierarchy1Field] = 'process_id';
-  if (mapping.yAxis.hierarchy2Field) fieldToSemantic[mapping.yAxis.hierarchy2Field] = 'thread_id';
+  if (hierarchyFields[0]) fieldToSemantic[hierarchyFields[0]] = 'process_id';
+  if (hierarchyFields[1]) fieldToSemantic[hierarchyFields[1]] = 'thread_id';
   if (mapping.yAxis.parentField) fieldToSemantic[mapping.yAxis.parentField] = 'parent_id';
-  if (mapping.yAxis.levelField) fieldToSemantic[mapping.yAxis.levelField] = 'level';
   if (mapping.identity.nameField) fieldToSemantic[mapping.identity.nameField] = 'name';
   if (mapping.identity.categoryField) fieldToSemantic[mapping.identity.categoryField] = 'category';
   if (mapping.identity.idField) fieldToSemantic[mapping.identity.idField] = 'id';
@@ -253,10 +303,8 @@ export function createDefaultMapping(): GanttDataMapping {
   return {
     xAxis: { startField: 'ts', endField: null, durationField: 'dur', timeUnit: 'us' },
     yAxis: {
-      hierarchy1Field: 'pid',
-      hierarchy2Field: 'tid',
-      parentField: 'ppid',
-      levelField: 'level'
+      hierarchyFields: ['pid', 'tid'],
+      parentField: 'ppid'
     },
     identity: { nameField: 'name', categoryField: 'cat', idField: 'id' },
     color: { keyField: 'pid' },
@@ -273,7 +321,17 @@ export function createDefaultMapping(): GanttDataMapping {
       showArgs: true,
       argsField: 'args'
     },
-    schema: { dataFormat: 'standard trace format', allFields: [], notes: '' }
+    schema: { dataFormat: 'standard trace format', allFields: [], notes: '' },
+    features: {
+      hierarchyLevels: 2,
+      hierarchyFields: ['pid', 'tid'],
+      forkTree: true,
+      dependencyLines: false,
+      dependencyField: null,
+      lanePacking: 'autoPack',
+      flameChart: false,
+      colorStrategy: 'hierarchy1'
+    }
   };
 }
 
@@ -313,7 +371,7 @@ export async function detectDataMappingWithLLM(events: any[]): Promise<GanttData
             endField: mapping.xAxis?.endField,
             durationField: mapping.xAxis?.durationField,
             timeUnit: mapping.xAxis?.timeUnit,
-            hierarchy1Field: mapping.yAxis?.hierarchy1Field,
+            hierarchyFields: mapping.yAxis?.hierarchyFields,
             nameField: mapping.identity?.nameField
           });
           resolve(mapping);
@@ -355,8 +413,14 @@ function validateAndFillMapping(raw: any): GanttDataMapping {
     ? raw.xAxis.timeUnit
     : defaults.xAxis.timeUnit;
   const timeUnit = inferredUnit ?? llmUnit;
+  const yAxisHierarchyFields =
+    Array.isArray(raw?.yAxis?.hierarchyFields) && raw.yAxis.hierarchyFields.length > 0
+      ? raw.yAxis.hierarchyFields.map(String)
+      : [raw?.yAxis?.hierarchy1Field ?? raw?.yAxis?.processField, raw?.yAxis?.hierarchy2Field ?? raw?.yAxis?.threadField]
+          .map((value: any) => (value == null ? '' : String(value).trim()))
+          .filter((value: string) => value.length > 0);
 
-  return {
+  const normalizedMapping: GanttDataMapping = {
     xAxis: {
       startField,
       endField,
@@ -364,10 +428,8 @@ function validateAndFillMapping(raw: any): GanttDataMapping {
       timeUnit
     },
     yAxis: {
-      hierarchy1Field: raw?.yAxis?.hierarchy1Field ?? raw?.yAxis?.processField ?? defaults.yAxis.hierarchy1Field,
-      hierarchy2Field: raw?.yAxis?.hierarchy2Field ?? raw?.yAxis?.threadField ?? defaults.yAxis.hierarchy2Field,
-      parentField: raw?.yAxis?.parentField ?? defaults.yAxis.parentField,
-      levelField: raw?.yAxis?.levelField ?? defaults.yAxis.levelField
+      hierarchyFields: yAxisHierarchyFields.length > 0 ? yAxisHierarchyFields : defaults.yAxis.hierarchyFields,
+      parentField: raw?.yAxis?.parentField ?? defaults.yAxis.parentField
     },
     identity: {
       nameField: raw?.identity?.nameField ?? defaults.identity.nameField,
@@ -405,8 +467,43 @@ function validateAndFillMapping(raw: any): GanttDataMapping {
           }))
         : defaults.schema.allFields,
       notes: String(raw?.schema?.notes || defaults.schema.notes)
+    },
+    features: {
+      hierarchyLevels:
+        typeof raw?.features?.hierarchyLevels === 'number' && raw.features.hierarchyLevels >= 1
+          ? raw.features.hierarchyLevels
+          : defaults.features.hierarchyLevels,
+      hierarchyFields:
+        Array.isArray(raw?.features?.hierarchyFields) && raw.features.hierarchyFields.length > 0
+          ? raw.features.hierarchyFields.map(String)
+          : defaults.features.hierarchyFields,
+      forkTree:
+        typeof raw?.features?.forkTree === 'boolean'
+          ? raw.features.forkTree
+          : defaults.features.forkTree,
+      dependencyLines:
+        typeof raw?.features?.dependencyLines === 'boolean'
+          ? raw.features.dependencyLines
+          : defaults.features.dependencyLines,
+      dependencyField:
+        raw?.features?.dependencyField != null
+          ? String(raw.features.dependencyField)
+          : defaults.features.dependencyField,
+      lanePacking:
+        ['autoPack', 'stack', 'flat'].includes(raw?.features?.lanePacking)
+          ? raw.features.lanePacking
+          : defaults.features.lanePacking,
+      flameChart:
+        typeof raw?.features?.flameChart === 'boolean'
+          ? raw.features.flameChart
+          : defaults.features.flameChart,
+      colorStrategy:
+        ['category', 'hierarchy1', 'name', 'field'].includes(raw?.features?.colorStrategy)
+          ? raw.features.colorStrategy
+          : defaults.features.colorStrategy
     }
   };
+  return normalizeHierarchyFeatures(normalizedMapping);
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -416,16 +513,17 @@ function validateAndFillMapping(raw: any): GanttDataMapping {
 /**
  * Process raw events using a flat field mapping.
  * Preserves all original fields AND adds normalized internal fields
- * (start, end, pid, tid, ppid, level, name, cat, args, id).
+ * (start, end, hierarchy1, hierarchy2, ppid, level, name, cat, args, id).
  *
  * @param rawEvents     Raw events from the data source
- * @param flatMapping   { pid, tid, ppid, start, end, duration, name, cat, args, level, id }
+ * @param flatMapping   { hierarchy1Field, hierarchy2Field, ppid, start, end, duration, name, cat, args, level, id }
  * @param timeMultiplier  Multiplier to convert source time unit to microseconds (default 1)
  */
 export function processEventsMinimal(
   rawEvents: any[],
   flatMapping: Record<string, string | null>,
-  timeMultiplier = 1
+  timeMultiplier = 1,
+  hierarchyFields?: string[]
 ): any[] {
   if (!Array.isArray(rawEvents) || rawEvents.length === 0) return [];
 
@@ -435,6 +533,16 @@ export function processEventsMinimal(
     'timeMultiplier:',
     timeMultiplier
   );
+
+  const mappingHierarchyFields = Object.keys(flatMapping)
+    .filter((key) => /^hierarchy\d+Field$/.test(key))
+    .sort((a, b) => {
+      const ai = Number(a.match(/^hierarchy(\d+)Field$/)?.[1] ?? 0);
+      const bi = Number(b.match(/^hierarchy(\d+)Field$/)?.[1] ?? 0);
+      return ai - bi;
+    })
+    .map((key) => flatMapping[key])
+    .filter((value): value is string => Boolean(value));
 
   const events = rawEvents
     .map((ev) => {
@@ -466,27 +574,47 @@ export function processEventsMinimal(
 
       let start = Number(startValue) * timeMultiplier;
       let end = Number(endValue) * timeMultiplier;
+      if (!Number.isFinite(start) && Number.isFinite(end)) {
+        // Preserve events that only provide an end timestamp.
+        start = end - 1;
+      }
+      if (!Number.isFinite(end) && Number.isFinite(start)) {
+        // Preserve events that only provide a start timestamp.
+        end = start + 1;
+      }
       // Enter/Leave pairs: Leave has start=leaveTime, end=enterTime so end < start. Use min/max so both show.
       if (Number.isFinite(start) && Number.isFinite(end) && end < start) {
         [start, end] = [end, start];
       }
+      // Preserve instantaneous events instead of dropping them. Some datasets encode
+      // valid point-events with start === end, and removing them can collapse lanes.
+      if (Number.isFinite(start) && Number.isFinite(end) && end === start) {
+        end = start + 1;
+      }
 
-      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
 
-      const pid = String(
-        getFieldValue(raw, flatMapping.pid) ??
-          getFieldValue(ev, flatMapping.pid) ??
-          ev.Location ??
-          'unknown'
-      );
-      const tid = String(
-        getFieldValue(raw, flatMapping.tid) ?? getFieldValue(ev, flatMapping.tid) ?? pid
-      );
+      const hierarchyFieldList =
+        Array.isArray(hierarchyFields) && hierarchyFields.length > 0
+          ? hierarchyFields
+          : mappingHierarchyFields;
+      const hierarchyValues = buildHierarchyValues(ev, raw, hierarchyFieldList, 'unknown', '<N/A>');
+      const hierarchyAliases = getHierarchyKeysFromHierarchyValues(hierarchyValues);
       const ppidRaw = getFieldValue(raw, flatMapping.ppid) ?? getFieldValue(ev, flatMapping.ppid);
       const ppid = ppidRaw == null ? null : String(ppidRaw);
 
       const levelRaw =
-        getFieldValue(raw, flatMapping.level) ?? getFieldValue(ev, flatMapping.level);
+        (flatMapping.level
+          ? getFieldValue(raw, flatMapping.level) ?? getFieldValue(ev, flatMapping.level)
+          : undefined) ??
+        raw?.level ??
+        ev?.level ??
+        raw?.depth ??
+        ev?.depth ??
+        raw?.args?.level ??
+        ev?.args?.level ??
+        raw?.args?.depth ??
+        ev?.args?.depth;
       let level: any = undefined;
       if (levelRaw !== undefined && levelRaw !== null) {
         const levelNum = Number(levelRaw);
@@ -503,10 +631,11 @@ export function processEventsMinimal(
       return {
         ...raw,
         ...ev,
+        kind: 'raw',
         start,
         end,
-        pid,
-        tid,
+        ...hierarchyAliases,
+        hierarchyValues: hierarchyAliases.hierarchyValues,
         ppid,
         level,
         name,
@@ -541,22 +670,42 @@ export function processEventsMinimal(
 }
 
 // ────────────────────────────────────────────────────────────────
-// Config generation from mapping
+// Deterministic config derivation from mapping + features
 // ────────────────────────────────────────────────────────────────
 
 /**
- * Generate initial Gantt config from the universal data mapping.
- * Translates the mapping into expression rules for the chart engine.
+ * Derive a GanttConfig patch deterministically from the DataMapping.
+ *
+ * This is NOT generated by the LLM — it reads the `features` flags and
+ * field mappings and produces the corresponding config rules so the
+ * default config "just works" for the dataset.
+ *
+ * The LLM only produces the DataMapping (including features); this
+ * function translates those declarative settings into the rule AST
+ * that the chart engine understands.
  */
-export function generateInitialConfig(mapping: GanttDataMapping): any {
+export function deriveConfigFromMapping(mapping: GanttDataMapping): any {
+  const normalized = normalizeHierarchyFeatures(mapping);
   const config: any = {};
+  const features = normalized.features;
+  const hierarchyFields = features.hierarchyFields;
+  const hierarchyLevels = Math.max(
+    1,
+    Number(features.hierarchyLevels || hierarchyFields.length || 1)
+  );
 
   // ── X-Axis (time) ──
-  // mergeGapRatio: gaps larger than this fraction of time window split collapsed bars
-  config.xAxis = { mergeGapRatio: 0.002 };
+  config.xAxis = { timeFormat: 'short' };
+  config.performance = {
+    ...(config.performance || {}),
+    hierarchy1LOD: { mergeUtilGap: 0.002 }
+  };
+  for (let level = 2; level <= hierarchyLevels; level += 1) {
+    config.performance[getHierarchyLodKey(level)] = { pixelWindow: 1 };
+  }
 
   // ── Color ──
-  const colorField = mapping.color.keyField;
+  const colorField = normalized.color.keyField;
   if (colorField) {
     config.color = {
       keyRule: {
@@ -567,8 +716,8 @@ export function generateInitialConfig(mapping: GanttDataMapping): any {
   }
 
   // ── Y-Axis ──
-  // Fork tree if parent field exists
-  if (mapping.yAxis.parentField) {
+  // Fork tree ordering when features.forkTree is enabled
+  if (features.forkTree && normalized.yAxis.parentField) {
     config.yAxis = {
       ...config.yAxis,
       hierarchy1OrderRule: {
@@ -579,47 +728,86 @@ export function generateInitialConfig(mapping: GanttDataMapping): any {
     };
   }
 
-  // Hierarchy1 label
-  if (mapping.yAxis.hierarchy1Field) {
+  // Hierarchy1 label: prefix with actual field name from mapping
+  const hierarchy1Field = hierarchyFields[0];
+  if (hierarchy1Field) {
     config.yAxis = {
       ...config.yAxis,
+      hierarchyFields,
+      hierarchy1Field,
       hierarchy1LabelRule: {
         type: 'expr',
         expr: {
           op: 'concat',
           args: [
             { op: 'if', args: [{ op: 'var', name: 'isExpanded' }, '\u25BC ', '\u25B6 '] },
-            { op: 'var', name: 'pid' }
+            { op: 'var', name: 'hierarchy1Field' },
+            ': ',
+            { op: 'var', name: 'hierarchy1' }
           ]
         }
       }
     };
   }
 
-  // Hierarchy2 label
-  const hierarchy2Field = mapping.yAxis.hierarchy2Field;
-  if (hierarchy2Field && hierarchy2Field !== mapping.yAxis.hierarchy1Field) {
+  // Hierarchy2 label: prefix with actual field name from mapping
+  const hierarchy2Field = hierarchyFields[1];
+  if (hierarchy2Field && hierarchyLevels >= 2) {
     config.yAxis = {
       ...config.yAxis,
+      hierarchy2Field,
       hierarchy2LabelRule: {
         type: 'expr',
         expr: {
-          op: 'if',
+          op: 'concat',
           args: [
-            { op: 'var', name: 'isMainThread' },
-            'main',
-            { op: 'concat', args: ['L2 ', { op: 'var', name: 'tid' }] }
+            { op: 'var', name: 'hierarchy2Field' },
+            ': ',
+            { op: 'var', name: 'hierarchy2' }
           ]
         }
       }
     };
   }
+  for (let level = 3; level <= hierarchyLevels; level += 1) {
+    const field = hierarchyFields[level - 1];
+    if (!field) continue;
+    const fieldKey = getHierarchyFieldVarName(level);
+    const valueKey = getHierarchyVarName(level);
+    config.yAxis = {
+      ...config.yAxis,
+      [fieldKey]: field,
+      [`hierarchy${level}LabelRule`]: {
+        type: 'expr',
+        expr: {
+          op: 'concat',
+          args: [{ op: 'var', name: fieldKey }, ': ', { op: 'var', name: valueKey }]
+        }
+      }
+    };
+  }
 
-  // Thread lane rule: default is autoPack; do not override by default.
+  // Lane packing defaults for hierarchy2+.
+  if (hierarchyLevels >= 2) {
+    const lanePackingName = features.lanePacking || 'autoPack';
+    config.yAxis = {
+      ...config.yAxis,
+      hierarchy2LaneRule: {
+        type: 'transform',
+        name: lanePackingName
+      }
+    };
+    for (let level = 3; level <= hierarchyLevels; level += 1) {
+      config.yAxis[`hierarchy${level}LaneRule`] = {
+        type: 'transform',
+        name: lanePackingName
+      };
+    }
+  }
 
   // ── Tooltip ──
   const tooltipFields: any[] = [];
-  for (const tf of mapping.tooltip.fields) {
+  for (const tf of normalized.tooltip.fields) {
     if (!tf.sourceField) continue;
 
     let valueExpr: any;
@@ -645,7 +833,7 @@ export function generateInitialConfig(mapping: GanttDataMapping): any {
       event: {
         fields: tooltipFields,
         args:
-          mapping.tooltip.showArgs !== false
+          normalized.tooltip.showArgs !== false
             ? { enabled: true, max: 24, sort: 'alpha', label: 'Arguments' }
             : { enabled: false }
       }
@@ -655,6 +843,12 @@ export function generateInitialConfig(mapping: GanttDataMapping): any {
   return config;
 }
 
+/**
+ * @deprecated Use deriveConfigFromMapping instead.
+ * Kept temporarily for backward compatibility with config bundles.
+ */
+export const generateInitialConfig = deriveConfigFromMapping;
+
 // ────────────────────────────────────────────────────────────────
 // Main entry point
 // ────────────────────────────────────────────────────────────────
@@ -663,16 +857,23 @@ export async function analyzeAndInitialize(rawEvents: any[]) {
   console.log('Starting data analysis with LLM (v2 – universal mapping)...');
 
   try {
-    // 1. Detect mapping using LLM
+    // 1. Detect mapping (including features) using LLM
     const dataMapping = await detectDataMappingWithLLM(rawEvents);
     console.log('Data mapping detected:', dataMapping);
+    console.log('Feature flags:', dataMapping.features);
 
     // 2. Extract flat field mapping for event processing
     const flatMapping = dataMappingToFlatFieldMapping(dataMapping);
+    const hierarchyFields = getHierarchyFieldsFromMapping(dataMapping);
     const timeMultiplier = getTimeMultiplier(dataMapping.xAxis.timeUnit);
 
     // 3. Process events
-    const processedEvents = processEventsMinimal(rawEvents, flatMapping, timeMultiplier);
+    const processedEvents = processEventsMinimal(
+      rawEvents,
+      flatMapping,
+      timeMultiplier,
+      hierarchyFields
+    );
     console.log(`Processed ${processedEvents.length} events`);
     if (processedEvents.length === 0) {
       console.warn('[DataAnalysisAgent] Mapping produced 0 events.', {
@@ -682,13 +883,15 @@ export async function analyzeAndInitialize(rawEvents: any[]) {
       });
     }
 
-    // 4. Generate initial config from mapping
-    const initialConfig = generateInitialConfig(dataMapping);
-    console.log('Initial config generated:', initialConfig);
+    // 4. Derive config deterministically from mapping + features
+    //    The LLM does NOT produce config rules — it only produces the DataMapping.
+    //    This function translates features into the rule AST the renderer expects.
+    const derivedConfig = deriveConfigFromMapping(dataMapping);
+    console.log('Derived config from mapping features:', derivedConfig);
 
     return {
       events: processedEvents,
-      config: initialConfig,
+      config: derivedConfig,
       dataMapping,
       // Backward-compat aliases used by config / widget agents
       schema: dataMappingToLegacySchema(dataMapping),
@@ -700,11 +903,16 @@ export async function analyzeAndInitialize(rawEvents: any[]) {
 
     const fallbackMapping = createDefaultMapping();
     const flatMapping = dataMappingToFlatFieldMapping(fallbackMapping);
-    const processedEvents = processEventsMinimal(rawEvents, flatMapping);
+    const processedEvents = processEventsMinimal(
+      rawEvents,
+      flatMapping,
+      1,
+      getHierarchyFieldsFromMapping(fallbackMapping)
+    );
 
     return {
       events: processedEvents,
-      config: {},
+      config: deriveConfigFromMapping(fallbackMapping),
       dataMapping: fallbackMapping,
       schema: dataMappingToLegacySchema(fallbackMapping),
       fieldMapping: flatMapping,
@@ -727,5 +935,6 @@ export const _test = {
   dataMappingToFlatFieldMapping,
   dataMappingToLegacySchema,
   processEventsMinimal,
+  deriveConfigFromMapping,
   generateInitialConfig
 };

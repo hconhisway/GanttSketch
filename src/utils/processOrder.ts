@@ -72,13 +72,13 @@ export function applyProcessOrderRule(
   ctx: {
     pids: string[];
     processStats?: Map<string, any>;
-    fork?: { parentByPid?: Map<string, string> };
+    fork?: { parentByHierarchy1?: Map<string, string> };
   }
-): { orderedPids: string[]; depthByPid: Map<string, number> } {
+): { orderedHierarchy1Ids: string[]; depthByHierarchy1: Map<string, number> } {
   const baseOrder = ctx?.pids ? ctx.pids.map(String) : [];
   let ordered = [...baseOrder];
-  let depthByPid = new Map<string, number>(ordered.map((pid) => [pid, 0]));
-  if (!rule) return { orderedPids: ordered, depthByPid };
+  let depthByHierarchy1 = new Map<string, number>(ordered.map((id) => [id, 0]));
+  if (!rule) return { orderedHierarchy1Ids: ordered, depthByHierarchy1 };
 
   const getRuleName = (step: any) => step?.name || step?.op || step?.type;
   const ruleParams = (step: any) => step?.params || {};
@@ -86,8 +86,18 @@ export function applyProcessOrderRule(
   const compareByRule =
     (ruleExpr: any, order = 'asc') =>
     (a: string, b: string) => {
-      const ctxA = { pid: a, stats: ctx.processStats?.get(String(a)) || {}, vars: { pid: a } };
-      const ctxB = { pid: b, stats: ctx.processStats?.get(String(b)) || {}, vars: { pid: b } };
+      const ctxA = {
+        pid: a,
+        hierarchy1: a,
+        stats: ctx.processStats?.get(String(a)) || {},
+        vars: { pid: a, hierarchy1: a }
+      };
+      const ctxB = {
+        pid: b,
+        hierarchy1: b,
+        stats: ctx.processStats?.get(String(b)) || {},
+        vars: { pid: b, hierarchy1: b }
+      };
       const va = evalExpr(ruleExpr, ctxA);
       const vb = evalExpr(ruleExpr, ctxB);
       let cmp = 0;
@@ -108,12 +118,12 @@ export function applyProcessOrderRule(
     const params = ruleParams(step);
     if (name === 'pidAsc' || name === 'hierarchy1Asc') {
       ordered = [...ordered].sort(comparePid);
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      depthByHierarchy1 = new Map(ordered.map((pid) => [pid, 0]));
       return;
     }
     if (name === 'pidDesc' || name === 'hierarchy1Desc') {
       ordered = [...ordered].sort((a, b) => -comparePid(a, b));
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      depthByHierarchy1 = new Map(ordered.map((pid) => [pid, 0]));
       return;
     }
     if (name === 'filter') {
@@ -121,11 +131,12 @@ export function applyProcessOrderRule(
       ordered = ordered.filter((pid) =>
         evalPredicate(when, {
           pid,
+          hierarchy1: pid,
           stats: ctx.processStats?.get(String(pid)) || {},
-          vars: { pid }
+          vars: { pid, hierarchy1: pid }
         })
       );
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      depthByHierarchy1 = new Map(ordered.map((pid) => [pid, 0]));
       return;
     }
     if (name === 'customList') {
@@ -149,7 +160,7 @@ export function applyProcessOrderRule(
         });
       }
       ordered = nextOrdered.length > 0 ? nextOrdered : baseOrder;
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      depthByHierarchy1 = new Map(ordered.map((pid) => [pid, 0]));
       return;
     }
     if (name === 'groupList') {
@@ -178,14 +189,14 @@ export function applyProcessOrderRule(
         });
       }
       ordered = nextOrdered.length > 0 ? nextOrdered : baseOrder;
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      depthByHierarchy1 = new Map(ordered.map((pid) => [pid, 0]));
       return;
     }
     if (name === 'sortBy') {
       const keyRule = params.key || step.key;
       const order = params.order || 'asc';
       ordered = [...ordered].sort(compareByRule(keyRule, order));
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      depthByHierarchy1 = new Map(ordered.map((pid) => [pid, 0]));
       return;
     }
     if (name === 'groupBy') {
@@ -196,8 +207,9 @@ export function applyProcessOrderRule(
       ordered.forEach((pid) => {
         const key = evalExpr(keyRule, {
           pid,
+          hierarchy1: pid,
           stats: ctx.processStats?.get(String(pid)) || {},
-          vars: { pid }
+          vars: { pid, hierarchy1: pid }
         });
         if (isEmptyValue(key)) {
           if (!includeUnspecified) return;
@@ -212,7 +224,7 @@ export function applyProcessOrderRule(
         return order === 'desc' ? -cmp : cmp;
       });
       ordered = groupKeys.flatMap((k) => groupMap.get(k)!);
-      depthByPid = new Map(ordered.map((pid) => [pid, 0]));
+      depthByHierarchy1 = new Map(ordered.map((pid) => [pid, 0]));
       return;
     }
     if (name === 'forkTree') {
@@ -222,18 +234,18 @@ export function applyProcessOrderRule(
       const existingPids = new Set(baseOrder.map((pid) => String(pid)));
 
       const fork = ctx.fork;
-      const parentByPidExisting = new Map<string, string>();
-      const childrenByPidExisting = new Map<string, string[]>();
-      if (fork && fork.parentByPid instanceof Map) {
-        for (const pid of existingPids) {
-          const ppid = fork.parentByPid.get(pid);
-          if (!ppid) continue;
-          const ppidStr = String(ppid);
-          if (!existingPids.has(ppidStr)) continue;
-          if (ppidStr === pid) continue;
-          parentByPidExisting.set(pid, ppidStr);
-          if (!childrenByPidExisting.has(ppidStr)) childrenByPidExisting.set(ppidStr, []);
-          childrenByPidExisting.get(ppidStr)!.push(pid);
+      const parentByHierarchy1Existing = new Map<string, string>();
+      const childrenByHierarchy1Existing = new Map<string, string[]>();
+      if (fork && fork.parentByHierarchy1 instanceof Map) {
+        for (const id of existingPids) {
+          const parentId = fork.parentByHierarchy1.get(id);
+          if (!parentId) continue;
+          const parentStr = String(parentId);
+          if (!existingPids.has(parentStr)) continue;
+          if (parentStr === id) continue;
+          parentByHierarchy1Existing.set(id, parentStr);
+          if (!childrenByHierarchy1Existing.has(parentStr)) childrenByHierarchy1Existing.set(parentStr, []);
+          childrenByHierarchy1Existing.get(parentStr)!.push(id);
         }
       }
 
@@ -245,15 +257,17 @@ export function applyProcessOrderRule(
         list.sort((a, b) => {
           const ctxA = {
             pid: a,
+            hierarchy1: a,
             parentPid,
             stats: ctx.processStats?.get(String(a)) || {},
-            vars: { pid: a, parentPid }
+            vars: { pid: a, hierarchy1: a, parentPid }
           };
           const ctxB = {
             pid: b,
+            hierarchy1: b,
             parentPid,
             stats: ctx.processStats?.get(String(b)) || {},
-            vars: { pid: b, parentPid }
+            vars: { pid: b, hierarchy1: b, parentPid }
           };
           const va = evalExpr(tieBreak, ctxA);
           const vb = evalExpr(tieBreak, ctxB);
@@ -268,47 +282,47 @@ export function applyProcessOrderRule(
         });
       };
 
-      for (const [ppid, kids] of childrenByPidExisting.entries()) {
-        sortList(kids, ppid);
-        childrenByPidExisting.set(ppid, kids);
+      for (const [parentId, kids] of childrenByHierarchy1Existing.entries()) {
+        sortList(kids, parentId);
+        childrenByHierarchy1Existing.set(parentId, kids);
       }
 
-      const roots = baseOrder.map(String).filter((pid) => !parentByPidExisting.has(pid));
+      const roots = baseOrder.map(String).filter((id) => !parentByHierarchy1Existing.has(id));
       sortList(roots, null);
 
       const nextOrdered: string[] = [];
       const nextDepth = new Map<string, number>();
       const visited = new Set<string>();
-      const dfsIterative = (startPids: string[]) => {
-        const stack: Array<{ pid: string; depth: number }> = [];
-        for (let i = startPids.length - 1; i >= 0; i -= 1) {
-          stack.push({ pid: startPids[i], depth: 0 });
+      const dfsIterative = (startIds: string[]) => {
+        const stack: Array<{ id: string; depth: number }> = [];
+        for (let i = startIds.length - 1; i >= 0; i -= 1) {
+          stack.push({ id: startIds[i], depth: 0 });
         }
         while (stack.length > 0) {
           const current = stack.pop();
           if (!current) continue;
-          const { pid, depth } = current;
-          if (!pid || visited.has(pid)) continue;
-          visited.add(pid);
-          nextOrdered.push(pid);
-          nextDepth.set(pid, depth);
-          const kids = childrenByPidExisting.get(pid) || [];
+          const { id, depth } = current;
+          if (!id || visited.has(id)) continue;
+          visited.add(id);
+          nextOrdered.push(id);
+          nextDepth.set(id, depth);
+          const kids = childrenByHierarchy1Existing.get(id) || [];
           for (let i = kids.length - 1; i >= 0; i -= 1) {
             const child = kids[i];
             if (!visited.has(child)) {
-              stack.push({ pid: child, depth: depth + 1 });
+              stack.push({ id: child, depth: depth + 1 });
             }
           }
         }
       };
       dfsIterative(roots);
       if (includeUnspecified) {
-        const remaining = baseOrder.filter((pid) => !visited.has(pid));
+        const remaining = baseOrder.filter((id) => !visited.has(id));
         dfsIterative(remaining);
       }
 
       ordered = nextOrdered.length > 0 ? nextOrdered : baseOrder;
-      depthByPid = nextDepth.size > 0 ? nextDepth : new Map(ordered.map((pid) => [pid, 0]));
+      depthByHierarchy1 = nextDepth.size > 0 ? nextDepth : new Map(ordered.map((id) => [id, 0]));
       return;
     }
   };
@@ -320,7 +334,7 @@ export function applyProcessOrderRule(
     applyStep(rule);
   }
 
-  return { orderedPids: ordered, depthByPid };
+  return { orderedHierarchy1Ids: ordered, depthByHierarchy1 };
 }
 
 export function buildPatchForPath(path: unknown, value: any): Record<string, any> {

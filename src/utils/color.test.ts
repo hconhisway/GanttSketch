@@ -8,7 +8,7 @@ describe('color utils', () => {
   });
 
   it('resolves color keys using rules and legacy config', () => {
-    const item = { pid: '1', name: 'task' };
+    const item = { hierarchy1: '1', name: 'task' };
     const keyRule = { op: 'get', path: 'event.name' };
     const key = resolveColorKey(item, 'track-1', { type: 'process' }, { keyRule }, null);
     expect(key).toBe('task');
@@ -19,7 +19,7 @@ describe('color utils', () => {
 
   it('resolves colors with fixed color overrides', () => {
     const color = resolveColor(
-      { pid: '1' },
+      { hierarchy1: '1' },
       'track-1',
       { type: 'process' },
       { fixedColor: '#ff00ff' },

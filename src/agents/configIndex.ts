@@ -74,6 +74,9 @@ function inferRelatedConcepts(entry: any) {
   if (path.includes('hierarchy2') || path.includes('thread') || desc.includes('thread')) {
     concepts.push('threads', 'tid', 'threading', 'hierarchy2');
   }
+  if (/hierarchy\d+/.test(path)) {
+    concepts.push('hierarchy', 'nested', 'level', 'subgroup');
+  }
   if (path.includes('height') || path.includes('width')) {
     concepts.push('size', 'dimension');
   }

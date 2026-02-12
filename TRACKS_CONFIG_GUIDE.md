@@ -2,7 +2,7 @@
 
 ## Overview
 
-The GanttSketch application now includes a powerful tracks configuration system that allows you to sort, filter, and group tracks in your Gantt chart. This guide explains how to use these features both through the UI and programmatically.
+The OSFAT application now includes a powerful tracks configuration system that allows you to sort, filter, and group tracks in your Gantt chart. This guide explains how to use these features both through the UI and programmatically.
 
 ## Features
 

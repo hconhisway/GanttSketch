@@ -6,7 +6,7 @@ Get started with intelligent, conversational track configuration in under 5 minu
 
 ### Prerequisites
 
-✅ GanttSketch application running  
+✅ OSFAT application running  
 ✅ LLM API configured (see [LLM_SETUP.md](./LLM_SETUP.md))  
 ✅ Chart displaying data
 

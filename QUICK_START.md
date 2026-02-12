@@ -2,7 +2,7 @@
 
 ## What's New?
 
-Your GanttSketch application now has an **AI-powered chat assistant** on the right side! The assistant can help you understand and analyze your Gantt chart data in real-time with streaming responses.
+Your OSFAT application now has an **AI-powered chat assistant** on the right side! The assistant can help you understand and analyze your Gantt chart data in real-time with streaming responses.
 
 ## Get Started in 3 Steps
 

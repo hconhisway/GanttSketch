@@ -8,6 +8,7 @@
 export {
   analyzeAndInitialize,
   detectDataMappingWithLLM,
+  deriveConfigFromMapping,
   generateInitialConfig,
   createDefaultMapping,
   dataMappingToFlatFieldMapping,

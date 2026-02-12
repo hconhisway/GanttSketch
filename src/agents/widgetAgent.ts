@@ -168,8 +168,10 @@ function formatDataSchema(dataSchema: any) {
 
   const lines = ['Fields in the data:'];
 
-  if (dataSchema.pid) lines.push(`- pid: ${dataSchema.pid} (hierarchy1 ID field)`);
-  if (dataSchema.tid) lines.push(`- tid: ${dataSchema.tid} (hierarchy2 ID field)`);
+  if (dataSchema.hierarchy1) lines.push(`- hierarchy1: ${dataSchema.hierarchy1} (level 1 ID field)`);
+  if (dataSchema.hierarchy2) lines.push(`- hierarchy2: ${dataSchema.hierarchy2} (level 2 ID field)`);
+  if (dataSchema.pid) lines.push(`- pid: ${dataSchema.pid} (legacy hierarchy1 field)`);
+  if (dataSchema.tid) lines.push(`- tid: ${dataSchema.tid} (legacy hierarchy2 field)`);
   if (dataSchema.ppid) lines.push(`- ppid: ${dataSchema.ppid} (parent hierarchy1 ID)`);
   if (dataSchema.name) lines.push(`- name: ${dataSchema.name} (event name field)`);
   if (dataSchema.cat) lines.push(`- cat: ${dataSchema.cat} (category field)`);
@@ -233,8 +235,8 @@ function formatSampleEvents(sampleEvents: any[] | undefined) {
   // Take up to 3 samples, trim to essential fields
   const samples = sampleEvents.slice(0, 3).map((event) => {
     const trimmed: any = {
-      pid: event.pid,
-      tid: event.tid,
+      hierarchy1: event.hierarchy1,
+      hierarchy2: event.hierarchy2,
       name: event.name,
       cat: event.cat
     };

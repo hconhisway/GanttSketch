@@ -51,6 +51,6 @@ describe('process order utils', () => {
       { type: 'transform', name: 'customList', params: { list: ['b'], includeUnspecified: true } },
       { pids: ['a', 'b', 'c'] }
     );
-    expect(result.orderedPids).toEqual(['b', 'a', 'c']);
+    expect(result.orderedHierarchy1Ids).toEqual(['b', 'a', 'c']);
   });
 });

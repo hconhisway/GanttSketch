@@ -3,10 +3,11 @@ export interface RawEvent {
 }
 
 export interface NormalizedEvent extends RawEvent {
-  pid: string;
-  tid: string;
+  hierarchy1: string;
+  hierarchy2: string;
   ppid?: string | null;
   level?: number;
+  hierarchyValues?: string[];
   start: number;
   end: number;
   id?: string | number | null;
@@ -14,6 +15,18 @@ export interface NormalizedEvent extends RawEvent {
   cat?: string;
   args?: Record<string, any>;
 }
+
+export interface SummarySpan extends Partial<NormalizedEvent> {
+  kind: 'summary';
+  lane: string;
+  start: number;
+  end: number;
+  count: number;
+  attrSummary: { topCategories: string[]; avgDuration: number };
+  colorKey?: string;
+}
+
+export type RenderPrimitive = (NormalizedEvent & { kind: 'raw' }) | SummarySpan;
 
 export interface DataSchema {
   [key: string]: any;
@@ -24,7 +37,7 @@ export interface FieldMapping {
 }
 
 export interface ProcessAggregate {
-  pid: string;
+  hierarchy1: string;
   count: number;
   totalDurUs: number;
   maxDurUs: number;

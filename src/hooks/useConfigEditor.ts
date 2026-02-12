@@ -4,6 +4,7 @@ import { applyGanttConfigPatch } from '../config/ganttConfig';
 import { buildPatchForPath, inferProcessSortModeFromRule } from '../utils/processOrder';
 import { getValueAtPath } from '../utils/expression';
 import { buildConfigBundle, downloadConfigBundle } from '../utils/configBundle';
+import { normalizeHierarchyFeatures } from '../utils/hierarchy';
 import type { GanttDataMapping, ProcessSortMode } from '../types/ganttConfig';
 
 interface UseConfigEditorArgs {
@@ -13,6 +14,7 @@ interface UseConfigEditorArgs {
   setMessages: Dispatch<SetStateAction<any[]>>;
   dataMapping?: GanttDataMapping | null;
   setDataMapping?: Dispatch<SetStateAction<GanttDataMapping | null>>;
+  onApplyDataMapping?: (mapping: GanttDataMapping) => void | Promise<void>;
 }
 
 interface OpenConfigEditorOptions {
@@ -26,7 +28,8 @@ export function useConfigEditor({
   setProcessSortMode,
   setMessages,
   dataMapping,
-  setDataMapping
+  setDataMapping,
+  onApplyDataMapping
 }: UseConfigEditorArgs) {
   const [activeConfigItem, setActiveConfigItem] = useState<any>(null);
   const [configEditorText, setConfigEditorText] = useState('');
@@ -96,7 +99,7 @@ export function useConfigEditor({
     setConfigEditorError('');
   }, [clearConfigHighlight, setActiveConfigItem, setConfigEditorError, setConfigEditorText]);
 
-  const handleSaveConfigEditor = useCallback(() => {
+  const handleSaveConfigEditor = useCallback(async () => {
     if (!activeConfigItem) return;
     try {
       const parsed = configEditorText ? JSON.parse(configEditorText) : null;
@@ -109,15 +112,19 @@ export function useConfigEditor({
         if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
           throw new Error('Data mapping must be a JSON object.');
         }
+        let nextMapping: GanttDataMapping;
         if (activeConfigItem.mappingKey) {
           if (!dataMapping) throw new Error('Data mapping is not set.');
-          setDataMapping({
+          nextMapping = {
             ...dataMapping,
             [activeConfigItem.mappingKey]: parsed
-          } as GanttDataMapping);
+          } as GanttDataMapping;
         } else {
-          setDataMapping(parsed as GanttDataMapping);
+          nextMapping = parsed as GanttDataMapping;
         }
+        nextMapping = normalizeHierarchyFeatures(nextMapping);
+        setDataMapping(nextMapping);
+        await onApplyDataMapping?.(nextMapping);
         clearConfigHighlight();
         setMessages((prev) => [
           ...prev,
@@ -166,7 +173,8 @@ export function useConfigEditor({
     setDataMapping,
     setGanttConfig,
     setMessages,
-    setProcessSortMode
+    setProcessSortMode,
+    onApplyDataMapping
   ]);
 
   const handleExportDataMapping = useCallback(() => {

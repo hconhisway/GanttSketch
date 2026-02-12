@@ -27,4 +27,9 @@ describe('configIndex', () => {
     const matches = findMatchingConfigs('color palette');
     expect(matches.length).toBeGreaterThan(0);
   });
+
+  it('matches hierarchy-related queries semantically', () => {
+    const matches = findMatchingConfigs('hierarchy3 label');
+    expect(matches.length).toBeGreaterThan(0);
+  });
 });

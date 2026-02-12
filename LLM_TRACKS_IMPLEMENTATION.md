@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document provides a comprehensive technical overview of the LLM-powered track configuration system implemented in GanttSketch.
+This document provides a comprehensive technical overview of the LLM-powered track configuration system implemented in OSFAT.
 
 ## Architecture
 
@@ -524,4 +524,4 @@ The LLM-powered track configuration system provides a natural, conversational in
 
 **Version:** 1.3.0  
 **Date:** 2025-11-06  
-**Author:** GanttSketch Development Team
+**Author:** OSFAT Development Team

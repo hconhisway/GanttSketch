@@ -319,7 +319,7 @@ const handleExport = (blob) => {
 
 ## License
 
-This module is part of the GanttSketch project and follows the same license.
+This module is part of the OSFAT project and follows the same license.
 
 ## Support
 
@@ -334,4 +334,4 @@ For issues or questions:
 
 **Version**: 1.0.0  
 **Last Updated**: November 2025  
-**Author**: GanttSketch Team
+**Author**: OSFAT Team

@@ -2,7 +2,7 @@
 
 ## Overview
 
-GanttSketch now features an intelligent LLM-powered system that can understand your natural language requests and visual annotations (sketches) to automatically configure track display. Simply describe what you want to see or draw on the chart, and the AI will generate the appropriate track configuration.
+OSFAT now features an intelligent LLM-powered system that can understand your natural language requests and visual annotations (sketches) to automatically configure track display. Simply describe what you want to see or draw on the chart, and the AI will generate the appropriate track configuration.
 
 ## How It Works
 

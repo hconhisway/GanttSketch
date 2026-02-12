@@ -76,14 +76,15 @@
   box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
 }
 
-.config-editor-example {
+.config-editor-guide {
   margin: 0;
   padding: 8px;
   border-radius: 6px;
-  background: #eef2ff;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
   font-size: 11px;
-  color: #3730a3;
-  overflow-x: auto;
+  color: #475569;
+  line-height: 1.4;
 }
 
 .config-editor-error {

@@ -61,8 +61,8 @@ function trimEventForPrompt(event: any): any {
   const preferredKeys = [
     'name',
     'cat',
-    'pid',
-    'tid',
+    'hierarchy1',
+    'hierarchy2',
     'ts',
     'dur',
     'start',
@@ -170,7 +170,7 @@ export function useChatAgent({
     setCurrentStreamingMessage('');
 
     // Prepare enhanced context about the current chart data for tracks configuration
-    const uniqueTracks = [...new Set(data.map((d) => d.pid ?? d.tid ?? d.track))];
+    const uniqueTracks = [...new Set(data.map((d) => d.hierarchy1 ?? d.hierarchy2 ?? d.track))];
     const configSummary = [
       `yAxis.hierarchy1OrderRule=${ganttConfig?.yAxis?.hierarchy1OrderRule?.name || 'pidAsc'}`,
       `yAxis.hierarchy2LaneRule=${ganttConfig?.yAxis?.hierarchy2LaneRule?.name || 'autoPack'}`,

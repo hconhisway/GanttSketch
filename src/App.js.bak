@@ -136,7 +136,7 @@ function App() {
           example: JSON.stringify(
             {
               xAxis: { startField: 'ts', endField: null, durationField: 'dur', timeUnit: 'us' },
-              yAxis: { processField: 'pid', threadField: 'tid', parentField: 'ppid', levelField: 'level' },
+              yAxis: { processField: 'pid', threadField: 'tid', parentField: 'ppid' },
               identity: { nameField: 'name', categoryField: 'cat', idField: 'id' },
               color: { keyField: 'cat' },
               barLabel: { field: 'name' },

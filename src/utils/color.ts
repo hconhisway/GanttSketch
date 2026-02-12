@@ -1,4 +1,5 @@
 import { evalExpr, hashStringToInt, isEmptyValue, pickFirstFieldValue } from './expression';
+import { getHierarchyValuesFromEvent, getHierarchyVarName } from './hierarchy';
 
 export function pickTextColor(hexColor: unknown): string {
   // Accept #rgb/#rrggbb; fall back to white for unknown formats
@@ -19,6 +20,27 @@ export function pickTextColor(hexColor: unknown): string {
   // Relative luminance
   const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   return luminance > 0.6 ? '#111' : '#fff';
+}
+
+function hasHierarchyInfo(source: any): boolean {
+  if (!source || typeof source !== 'object') return false;
+  if (Array.isArray(source.hierarchyValues) && source.hierarchyValues.length > 0) return true;
+  if (source.hierarchy1 != null || source.hierarchy2 != null) return true;
+  return Object.keys(source).some((key) => /^hierarchy\d+$/.test(key));
+}
+
+function getHierarchyValuesForColor(item: any, trackMeta: any): string[] {
+  if (hasHierarchyInfo(item)) return getHierarchyValuesFromEvent(item);
+  if (hasHierarchyInfo(trackMeta)) return getHierarchyValuesFromEvent(trackMeta);
+  return ['unknown', 'unknown'];
+}
+
+function buildHierarchyVars(values: string[]): Record<string, string> {
+  const vars: Record<string, string> = {};
+  values.forEach((value, index) => {
+    vars[getHierarchyVarName(index + 1)] = value;
+  });
+  return vars;
 }
 
 export function resolveColorKeyLegacy(
@@ -43,10 +65,17 @@ export function resolveColorKeyLegacy(
   }
 
   if (isEmptyValue(keyValue)) {
+    const hierarchyValues = getHierarchyValuesForColor(item, trackMeta);
+    const hierarchy1 = hierarchyValues[0] ?? 'unknown';
+    const hierarchyPath = hierarchyValues.join('|');
+    const hierarchy2Path =
+      hierarchyValues.length > 1 ? hierarchyValues.slice(1).join('|') : hierarchy1;
     const fallbackKey =
       trackMeta?.type === 'process'
-        ? (item?.pid ?? trackMeta?.pid ?? trackKey ?? '')
-        : `${item?.tid ?? trackMeta?.tid ?? trackKey}-${item?.level ?? trackMeta?.level ?? 0}`;
+        ? hierarchy1
+        : `${hierarchyPath || hierarchy2Path || trackKey}-${
+            item?.level ?? trackMeta?.level ?? 0
+          }`;
     keyValue = fallbackKey;
   }
 
@@ -60,14 +89,26 @@ export function resolveColorKey(
   colorConfig: any,
   legacyColorConfig: any
 ): string {
+  const hierarchyValues = getHierarchyValuesForColor(item, trackMeta);
+  const hierarchy1 = hierarchyValues[0] ?? 'unknown';
+  const hierarchy2Path =
+    hierarchyValues.length > 1 ? hierarchyValues.slice(1).join('|') : hierarchy1;
+  const hierarchyPath = hierarchyValues.join('|');
+  const hierarchyVars = buildHierarchyVars(hierarchyValues);
+
+  if (!isEmptyValue(item?.colorKey)) {
+    return String(item.colorKey);
+  }
   if (colorConfig?.keyRule) {
     const key = evalExpr(colorConfig.keyRule, {
       event: item,
       trackKey,
       trackMeta,
-      pid: item?.pid ?? trackMeta?.pid,
-      tid: item?.tid ?? trackMeta?.tid,
-      level: item?.level ?? trackMeta?.level
+      hierarchy1,
+      hierarchy2: hierarchy2Path,
+      hierarchyValues,
+      level: item?.level ?? trackMeta?.level,
+      ...hierarchyVars
     });
     if (!isEmptyValue(key)) return String(key);
   }
@@ -76,8 +117,8 @@ export function resolveColorKey(
   }
   const fallbackKey =
     trackMeta?.type === 'process'
-      ? (item?.pid ?? trackMeta?.pid ?? trackKey ?? '')
-      : `${item?.tid ?? trackMeta?.tid ?? trackKey}-${item?.level ?? trackMeta?.level ?? 0}`;
+      ? hierarchy1
+      : `${hierarchyPath || hierarchy2Path || trackKey}-${item?.level ?? trackMeta?.level ?? 0}`;
   return String(fallbackKey ?? '');
 }
 
@@ -90,6 +131,11 @@ export function resolveColor(
   legacyColorConfig: any,
   processStats?: Map<string, any>
 ): string {
+  const hierarchyValues = getHierarchyValuesForColor(item, trackMeta);
+  const hierarchy1 = hierarchyValues[0] ?? 'unknown';
+  const hierarchy2Path =
+    hierarchyValues.length > 1 ? hierarchyValues.slice(1).join('|') : hierarchy1;
+  const hierarchyVars = buildHierarchyVars(hierarchyValues);
   const palette =
     Array.isArray(colorConfig?.palette) && colorConfig.palette.length > 0
       ? colorConfig.palette
@@ -99,18 +145,20 @@ export function resolveColor(
     return colorConfig.fixedColor;
   }
   if (colorConfig?.colorRule) {
-    const stats = processStats?.get(String(item?.pid ?? trackMeta?.pid)) || {};
+    const stats = processStats?.get(String(hierarchy1)) || {};
     const resolved = evalExpr(colorConfig.colorRule, {
       event: item,
       trackKey,
       trackMeta,
-      pid: item?.pid ?? trackMeta?.pid,
-      tid: item?.tid ?? trackMeta?.tid,
+      hierarchy1,
+      hierarchy2: hierarchy2Path,
+      hierarchyValues,
       level: item?.level ?? trackMeta?.level,
       stats,
       colorKey,
       palette,
-      vars: { colorKey, palette }
+      ...hierarchyVars,
+      vars: { colorKey, palette, hierarchyValues, ...hierarchyVars }
     });
     if (!isEmptyValue(resolved)) return String(resolved);
   }

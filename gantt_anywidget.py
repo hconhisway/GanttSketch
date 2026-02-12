@@ -110,7 +110,7 @@ function render({ el, model }) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>GanttSketch Widget</title>
+    <title>OSFAT Widget</title>
     <link rel="stylesheet" href="data:text/css;base64,${css_b64}">
     <style>${CSS_OVERRIDES}</style>
   </head>

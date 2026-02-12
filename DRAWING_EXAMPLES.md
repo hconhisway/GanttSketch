@@ -124,7 +124,7 @@ This document provides practical examples of how to use the drawing module effec
 
 **Steps**:
 
-1. Share screen with GanttSketch open
+1. Share screen with OSFAT open
 2. Enter drawing mode during discussion
 3. As issues are mentioned:
    - Use **Red** for problems

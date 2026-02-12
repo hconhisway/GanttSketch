@@ -56,13 +56,15 @@
     ],
     "context": {
       "event": "Current event object (for color/tooltip)",
-      "pid": "Hierarchy1 id (key)",
-      "tid": "Hierarchy2 id (key)",
+      "hierarchy1": "Hierarchy1 id (key)",
+      "hierarchy2": "Hierarchy2 id (key)",
+      "hierarchy3": "Hierarchy3 id (key, when present)",
       "level": "Lane level number",
       "trackKey": "Current track key",
       "stats": "Per-hierarchy1 stats: count, totalDurUs, avgDurUs, maxDurUs, minStart, maxEnd",
       "isExpanded": "Boolean for hierarchy1 expanded state",
-      "isMainThread": "Boolean for hierarchy2 label"
+      "isMainThread": "Boolean for hierarchy2 label",
+      "hierarchy3Field": "Display name for hierarchy3 field (dynamic hierarchy)"
     }
   },
   "sections": [
@@ -141,21 +143,21 @@
     },
     {
       "id": "xAxis",
-      "description": "Time axis: merge gap for hierarchy1 bar aggregation.",
+      "description": "Time axis configuration.",
       "entries": [
         {
-          "id": "xAxis.mergeGapRatio",
-          "path": "xAxis.mergeGapRatio",
+          "id": "xAxis.timeFormat",
+          "path": "xAxis.timeFormat",
           "kind": "value",
-          "schema": { "type": "number", "min": 0, "max": 1 },
-          "default": 0.002,
-          "description": "Merge gap as fraction of time window (0-1). Gaps larger than this split collapsed hierarchy1 bars."
+          "schema": { "type": "string", "enum": ["short", "full"] },
+          "default": "short",
+          "description": "Time label format for x-axis ticks."
         }
       ]
     },
     {
       "id": "yAxis",
-      "description": "Hierarchy1 ordering, hierarchy2 lane policy, and labels.",
+      "description": "Hierarchy1 ordering, hierarchy2 lane policy, and labels. Runtime also supports dynamic yAxis.hierarchyNField/hierarchyNLabelRule/hierarchyNLaneRule paths.",
       "entries": [
         {
           "id": "yAxis.hierarchy1OrderRule",
@@ -283,6 +285,44 @@
             "filter": "predicate",
             "value": "expr"
           }
+        }
+      ]
+    },
+    {
+      "id": "performance",
+      "description": "Performance tuning and diagnostics.",
+      "entries": [
+        {
+          "id": "performance.hierarchy1LOD.mergeUtilGap",
+          "path": "performance.hierarchy1LOD.mergeUtilGap",
+          "kind": "value",
+          "schema": { "type": "number", "min": 0, "max": 1 },
+          "default": 0.002,
+          "description": "Hierarchy1 merge gap as fraction of time window for LOD."
+        },
+        {
+          "id": "performance.hierarchy2LOD.pixelWindow",
+          "path": "performance.hierarchy2LOD.pixelWindow",
+          "kind": "value",
+          "schema": { "type": "number", "min": 1, "max": 64 },
+          "default": 1,
+          "description": "Hierarchy2 LOD pixel window size."
+        },
+        {
+          "id": "performance.webglEnabled",
+          "path": "performance.webglEnabled",
+          "kind": "value",
+          "schema": { "type": "boolean" },
+          "default": false,
+          "description": "Enable WebGL rendering when available."
+        },
+        {
+          "id": "performance.showOverlay",
+          "path": "performance.showOverlay",
+          "kind": "value",
+          "schema": { "type": "boolean" },
+          "default": false,
+          "description": "Show performance overlay."
         }
       ]
     },

@@ -46,6 +46,11 @@ export interface YAxisConfig {
   hierarchy2LaneRule?: Rule;
   hierarchy1LabelRule?: Rule;
   hierarchy2LabelRule?: Rule;
+  hierarchyFields?: string[];
+  [key: `hierarchy${number}Field`]: any;
+  [key: `hierarchy${number}OrderRule`]: any;
+  [key: `hierarchy${number}LaneRule`]: any;
+  [key: `hierarchy${number}LabelRule`]: any;
   orderMode?: string;
   includeUnspecified?: boolean;
   customOrder?: string[];
@@ -94,6 +99,8 @@ export type ProcessSortMode = 'default' | 'fork';
 export interface XAxisConfig {
   /** Merge gap as fraction of time window (0–1). Gaps larger than this split hierarchy1 bars. Default 0.002. */
   mergeGapRatio?: number;
+  /** Time label format on the x-axis. */
+  timeFormat?: 'short' | 'full';
 }
 
 export interface GanttConfig {
@@ -104,6 +111,29 @@ export interface GanttConfig {
   colorMapping?: any;
   tooltip: TooltipConfig;
   extensions: Record<string, any>;
+  dependencies?: {
+    maxEdges?: number;
+  };
+  performance?: {
+    showOverlay?: boolean;
+    webglEnabled?: boolean;
+    streamingEnabled?: boolean;
+    streamingMaxReqPerSec?: number;
+    streamingBufferFactor?: number;
+    streamingSimulate?: boolean;
+    hierarchy1LOD?: {
+      pixelWindow?: number;
+      mergeUtilGap?: number;
+    };
+    hierarchy2LOD?: {
+      pixelWindow?: number;
+      mergeUtilGap?: number;
+    };
+    [key: `hierarchy${number}LOD`]: {
+      pixelWindow?: number;
+      mergeUtilGap?: number;
+    } | any;
+  };
 }
 
 export interface ConfigEntry {
@@ -147,10 +177,8 @@ export interface GanttDataMapping {
   };
   /** Hierarchy1/hierarchy2 grouping (Y-axis rows) */
   yAxis: {
-    hierarchy1Field: string | null;
-    hierarchy2Field: string | null;
+    hierarchyFields: string[];
     parentField: string | null;
-    levelField: string | null;
   };
   /** Event identity and classification */
   identity: {
@@ -185,5 +213,56 @@ export interface GanttDataMapping {
       sampleValues?: any[];
     }>;
     notes: string;
+  };
+
+  /**
+   * Feature flags and intelligent defaults inferred by the data analysis agent.
+   * These control which chart capabilities are enabled and how the default
+   * config should be derived, without directly patching the GanttConfig.
+   */
+  features: {
+    /**
+     * Number of hierarchy levels detected in the data (e.g. 2 = process/thread).
+     * Currently the renderer supports up to 2; future expansion will use this value.
+     */
+    hierarchyLevels: number;
+    /**
+     * Mapping from hierarchy depth (1-based) to the data field that provides
+     * values for that level. Length should equal hierarchyLevels.
+     * e.g. ["pid", "tid"] for a 2-level hierarchy.
+     */
+    hierarchyFields: string[];
+    /**
+     * Whether to enable fork-tree (parent-child) ordering on the Y-axis.
+     * True when a parentField is present and meaningful.
+     */
+    forkTree: boolean;
+    /**
+     * Whether to show dependency / flow lines between events.
+     * (Not yet supported — reserved for future implementation.)
+     */
+    dependencyLines: boolean;
+    /**
+     * Field path used for dependency source, if dependencyLines is true.
+     * null when not applicable.
+     */
+    dependencyField: string | null;
+    /**
+     * How events within a hierarchy2 lane should be packed.
+     * "autoPack" (default) | "stack" | "flat"
+     */
+    lanePacking: 'autoPack' | 'stack' | 'flat';
+    /**
+     * Whether the data represents a flame-chart style (nested levels within a single thread).
+     */
+    flameChart: boolean;
+    /**
+     * Suggested color strategy detected from the data.
+     * "category" = color by category/type field
+     * "hierarchy1" = color by top-level grouping
+     * "name" = color by event name
+     * "field" = color by a specific field (see color.keyField)
+     */
+    colorStrategy: 'category' | 'hierarchy1' | 'name' | 'field';
   };
 }

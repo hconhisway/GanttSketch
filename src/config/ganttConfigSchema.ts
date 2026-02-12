@@ -51,7 +51,7 @@ export const COLOR_CONFIG_SCHEMA = {
       // Color by name
       { type: 'expr', expr: { op: 'get', path: 'event.name' } },
       // Color by hierarchy1 key
-      { type: 'expr', expr: { op: 'var', name: 'pid' } },
+      { type: 'expr', expr: { op: 'var', name: 'hierarchy1' } },
       // Coalesce multiple fields
       {
         type: 'expr',
@@ -145,6 +145,8 @@ export const YAXIS_CONFIG_SCHEMA = {
       { type: 'transform', name: 'byField', params: { field: 'cat' } }
     ]
   }
+  // Additional dynamic paths are also supported at runtime:
+  // yAxis.hierarchyNField, yAxis.hierarchyNLabelRule, yAxis.hierarchyNLaneRule (N >= 3)
 };
 
 /**
@@ -197,7 +199,20 @@ export const EXPRESSION_OPS = {
   var: {
     description: 'Get a context variable',
     format: '{ op: "var", name: "varName" }',
-    variables: ['pid', 'tid', 'level', 'colorKey', 'palette', 'startUs', 'durationUs', 'trackKey']
+    variables: [
+      'hierarchy1',
+      'hierarchy2',
+      'hierarchy3',
+      'hierarchy1Field',
+      'hierarchy2Field',
+      'hierarchy3Field',
+      'level',
+      'colorKey',
+      'palette',
+      'startUs',
+      'durationUs',
+      'trackKey'
+    ]
   },
 
   // String operations
@@ -348,10 +363,21 @@ api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), {
 \`\`\`
 
 ### X-Axis (time)
-**xAxis.mergeGapRatio** (number 0–1, default 0.002) – Merge gap as fraction of time window; gaps larger than this split collapsed hierarchy1 bars:
+**xAxis.timeFormat** ("short" | "full", default "short") – Time label format for x-axis ticks:
 \`\`\`javascript
 api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), {
-  xAxis: { mergeGapRatio: 0.01 }
+  xAxis: { timeFormat: 'full' }
+}));
+\`\`\`
+
+### Performance LOD (per hierarchy)
+Use either **pixelWindow** or **mergeUtilGap** per hierarchy:
+\`\`\`javascript
+api.setGanttConfig(api.applyGanttConfigPatch(api.getGanttConfig(), {
+  performance: {
+    hierarchy1LOD: { mergeUtilGap: 0.01 },
+    hierarchy2LOD: { pixelWindow: 2 }
+  }
 }));
 \`\`\`
 
@@ -371,7 +397,7 @@ api.setViewRange({ start: 0, end: 1000000 }); // microseconds
 ### Expression DSL
 Available operations: get, var, concat, if, coalesce, ==, !=, and, or, add, sub, mul, div, paletteHash, formatTimeUs, formatDurationUs
 
-Context variables: pid, tid, level, colorKey, palette, startUs, durationUs, trackKey`;
+Context variables: hierarchy1, hierarchy2, level, colorKey, palette, startUs, durationUs, trackKey`;
 }
 
 /**

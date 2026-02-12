@@ -51,6 +51,15 @@ export interface ConfigAgentOptions {
   fieldMapping?: Record<string, string>;
 }
 
+function isDynamicHierarchyPath(path: string): boolean {
+  if (!path || typeof path !== 'string') return false;
+  return (
+    /^yAxis\.hierarchy\d+(Field|OrderRule|LaneRule|LabelRule)$/.test(path) ||
+    /^performance\.hierarchy\d+LOD\.(pixelWindow|mergeUtilGap)$/.test(path) ||
+    /^performance\.hierarchy\d+LOD$/.test(path)
+  );
+}
+
 /**
  * Build the system prompt dynamically - NO static placeholders, all real data
  */
@@ -70,7 +79,7 @@ export function buildConfigAgentPrompt(options: ConfigAgentOptions) {
             })),
             fieldMapping: fieldMapping || {},
             format: schema.dataFormat,
-            note: 'Events have BOTH original fields AND standard internal fields (start, end, pid, tid, etc.)'
+            note: 'Events have BOTH original fields AND standard internal fields (start, end, hierarchy1, hierarchy2, etc.)'
           },
           null,
           2
@@ -135,7 +144,7 @@ ${buildRuleDslReference()}
 
 Common expression patterns:
 - Get field: { "op": "get", "path": "event.FIELDNAME" } - use actual field names from the list above
-- Get variable: { "op": "var", "name": "varName" } (pid, tid, level, startUs, durationUs, etc.)
+- Get variable: { "op": "var", "name": "varName" } (hierarchy1, hierarchy2, level, startUs, durationUs, etc.)
 - Coalesce: { "op": "coalesce", "args": [expr1, expr2, ...] }
 - Concatenate: { "op": "concat", "args": ["string", expr, ...] }
 - Conditional: { "op": "if", "args": [condition, thenValue, elseValue] }
@@ -151,6 +160,12 @@ Common transform patterns:
 - Sort by: { "type": "transform", "name": "sortBy", "params": { "key": "stats.totalDurUs", "desc": true } }
 - Auto pack: { "type": "transform", "name": "autoPack" }
 - By field (any attribute): { "type": "transform", "name": "byField", "params": { "field": "eventAttrPath" } }
+- Dynamic hierarchy paths are allowed even when not listed statically:
+  - yAxis.hierarchyNField
+  - yAxis.hierarchyNLabelRule
+  - yAxis.hierarchyNLaneRule
+  - performance.hierarchyNLOD.pixelWindow
+  - performance.hierarchyNLOD.mergeUtilGap
 
 ## Task
 Based on the user's request, output a config patch.
@@ -227,16 +242,17 @@ export function validatePatch(patch: any, schema: any) {
 
       // Check if path exists in CONFIG_INDEX
       const configItem = (CONFIG_INDEX as any)[fullPath];
+      const dynamicHierarchy = isDynamicHierarchyPath(fullPath);
 
-      if (configItem) {
+      if (configItem || dynamicHierarchy) {
         // Validate against schema
-        if (configItem.kind === 'rule') {
+        if (configItem?.kind === 'rule' || /Rule$/.test(fullPath)) {
           if (typeof value !== 'object' || !(value as any).type) {
             warnings.push(`${fullPath}: Expected a rule object with 'type' field`);
           }
         }
 
-        if (configItem.schema) {
+        if (configItem?.schema) {
           // Type checking
           const schemaType = configItem.schema.type;
           if (schemaType === 'number' && typeof value !== 'number') {
@@ -281,7 +297,7 @@ export function extractTargetPath(patch: any) {
     for (const [key, value] of Object.entries(obj)) {
       const fullPath = currentPath ? `${currentPath}.${key}` : key;
 
-      if ((CONFIG_INDEX as any)[fullPath]) {
+      if ((CONFIG_INDEX as any)[fullPath] || isDynamicHierarchyPath(fullPath)) {
         paths.push(fullPath);
       }
 
