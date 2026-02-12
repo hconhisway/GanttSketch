@@ -54,6 +54,8 @@ type WidgetBinding = { element: Element; event: string; handler: EventListener }
 // API configuration
 const API_URL = 'http://127.0.0.1:8080/get-events';
 // const API_URL = 'http://127.0.0.1:8080/get-data-in-range';
+const EXPORT_ANYWIDGET_URL =
+  process.env.REACT_APP_EXPORT_ANYWIDGET_URL || 'http://127.0.0.1:8090/api/export-anywidget';
 const FRONTEND_TRACE_URL = `${process.env.PUBLIC_URL || ''}/unet3d_a100--verify-1.pfw`;
 const FRONTEND_TRACE_LABEL = 'unet3d_a100--verify-1.pfw';
 const DEFAULT_END_US = 2e15; // Large enough for epoch-microsecond traces (~1.76e15 typical); 100_000_000 would filter out most events
@@ -176,6 +178,7 @@ function App() {
   const [inputMessage, setInputMessage] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState('');
+  const [isExportingAnywidget, setIsExportingAnywidget] = useState(false);
 
   // Drawing state
   const [isDrawingMode, setIsDrawingMode] = useState(false);
@@ -878,6 +881,65 @@ function App() {
     }
   }, []);
 
+  const handleExportAnywidget = useCallback(async () => {
+    if (isExportingAnywidget) return;
+    setIsExportingAnywidget(true);
+    setMessages((prev) => [
+      ...prev,
+      { role: 'system', content: '⏳ Export started: running build + anywidget generation...' }
+    ]);
+
+    try {
+      const response = await fetch(EXPORT_ANYWIDGET_URL, {
+        method: 'POST'
+      });
+
+      if (!response.ok) {
+        let errorMessage = `Export failed with status ${response.status}.`;
+        try {
+          const errorPayload = await response.json();
+          const stage = errorPayload?.stage ? ` [${String(errorPayload.stage)}]` : '';
+          if (errorPayload?.message) {
+            errorMessage = `${String(errorPayload.message)}${stage}`;
+          }
+        } catch {
+          // Fall back to generic status message when payload is not JSON.
+        }
+        throw new Error(errorMessage);
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get('content-disposition') || '';
+      const fileNameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+      const fileName = fileNameMatch?.[1] || 'gantt_anywidget.py';
+
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(downloadUrl);
+
+      setMessages((prev) => [
+        ...prev,
+        { role: 'system', content: `✅ Anywidget export complete: ${fileName}` }
+      ]);
+    } catch (error: any) {
+      console.error('Anywidget export failed:', error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'system',
+          content: `⚠️ Anywidget export failed: ${error?.message || error}. Start local export server with "npm run export:server".`
+        }
+      ]);
+    } finally {
+      setIsExportingAnywidget(false);
+    }
+  }, [isExportingAnywidget, setMessages]);
+
   const { handleSendMessage, handleKeyPress } = useChatAgent({
     inputMessage,
     isStreaming,
@@ -1020,8 +1082,17 @@ function App() {
 
         <RightPanel>
           <div className="chat-header">
-            <h3>Chart Assistant</h3>
-            <p className="chat-subtitle">Ask questions about your data</p>
+            <h4>Customization Panel</h4>
+            <button
+              type="button"
+              className="export-anywidget-btn"
+              onClick={handleExportAnywidget}
+              disabled={isExportingAnywidget}
+              title="Run npm build + anywidget script and download .py file"
+            >
+              {isExportingAnywidget ? 'Exporting...' : 'Export Anywidget'}
+            </button>
+            {/* <p className="chat-subtitle">Ask questions about your data</p> */}
           </div>
 
           <ConfigPanel

@@ -70,6 +70,28 @@ This repo includes a single-file `anywidget` wrapper that embeds the built React
 ```python
 from gantt_anywidget import GanttWidget
 GanttWidget(width="100%", height="600px")
+
+### Optional: UI-triggered export server
+
+To run the original `npm run build` + Python script flow from a button in the frontend, start the local export server:
+
+```bash
+npm run export:server
+```
+
+The frontend calls `POST http://127.0.0.1:8090/api/export-anywidget`, and the server:
+
+1. runs `npm run build`
+2. runs `python scripts/build_anywidget_singlefile.py`
+3. returns `gantt_anywidget.py` as a download
+
+Security defaults:
+
+- binds to `127.0.0.1` only
+- allows only localhost frontend origins
+- runs fixed commands only (no command passthrough)
+- rejects concurrent export jobs
+- supports optional API key via `EXPORT_SERVER_API_KEY`
 ```
 
 ## Prerequisites

@@ -4,6 +4,10 @@
   border-bottom: 1px solid #e0e0e0;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .chat-drawing-controls {
@@ -59,6 +63,34 @@
   margin: 0 0 5px 0;
   font-size: 20px;
   font-weight: 600;
+}
+
+.chat-header h4 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.export-anywidget-btn {
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+  white-space: nowrap;
+}
+
+.export-anywidget-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.export-anywidget-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 .chat-subtitle {

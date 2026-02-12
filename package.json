@@ -18,6 +18,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "export:server": "node tools/exportServer.js",
     "test": "react-scripts test",
     "test:perf": "playwright test",
     "eject": "react-scripts eject"
