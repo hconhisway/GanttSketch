@@ -79,7 +79,7 @@ To run the original `npm run build` + Python script flow from a button in the fr
 npm run export:server
 ```
 
-The frontend calls `POST http://127.0.0.1:8090/api/export-anywidget`, and the server:
+The frontend calls the **same origin** for both data and export (e.g. `GET /get-events`, `POST /api/export-anywidget`), so when deployed, requests go to your server, not the visitor’s machine. The export server:
 
 1. runs `npm run build`
 2. runs `python scripts/build_anywidget_singlefile.py`
@@ -93,6 +93,18 @@ Security defaults:
 - rejects concurrent export jobs
 - supports optional API key via `EXPORT_SERVER_API_KEY`
 ```
+
+### Deploying frontend + backend on one server
+
+**重要：线上必须用生产构建**（`npm run build` 后由 nginx 提供 `build/` 目录），**不要用 `npm start`**。否则会出现 `WebSocket ... :3000/ws failed`（开发环境 HMR）以及 502 等异常。完整步骤见 **[DEPLOY.md](./DEPLOY.md)**。
+
+简要要求：
+
+1. **前端**：`npm run build`，nginx 的 `root` 指向 `build/`。
+2. **Data API**：nginx 将 `/get-events` 转到数据后端（如 `http://127.0.0.1:8080`）。
+3. **Export**：在服务器上运行 `npm run export:server`（默认 8090），并设置 `EXPORT_SERVER_ALLOWED_ORIGINS=https://你的域名`；nginx 将 `/api/export-anywidget` 转到 `http://127.0.0.1:8090`。
+
+502 时可在服务器上执行 `curl -s http://127.0.0.1:8090/health` 确认 export 服务是否在运行。
 
 ## Prerequisites
 

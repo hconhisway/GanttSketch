@@ -51,11 +51,19 @@ import { perfMetrics } from './utils/perfMetrics';
 type ViewRange = { start: number; end: number };
 type WidgetBinding = { element: Element; event: string; handler: EventListener };
 
-// API configuration
-const API_URL = 'http://127.0.0.1:8080/get-events';
-// const API_URL = 'http://127.0.0.1:8080/get-data-in-range';
+// API configuration: use same origin in browser so requests hit the server the user is visiting.
+const API_URL =
+  process.env.REACT_APP_API_URL ||
+  (typeof window !== 'undefined'
+    ? `${window.location.origin}/get-events`
+    : 'http://127.0.0.1:8080/get-events');
+// Use same origin at runtime so export goes to the server the user is visiting (avoids
+// deploy builds with localhost baking in and requests hitting the visitor's machine).
 const EXPORT_ANYWIDGET_URL =
-  process.env.REACT_APP_EXPORT_ANYWIDGET_URL || 'http://127.0.0.1:8090/api/export-anywidget';
+  process.env.REACT_APP_EXPORT_ANYWIDGET_URL ||
+  (typeof window !== 'undefined'
+    ? `${window.location.origin}/api/export-anywidget`
+    : 'https://virtranoteapp.sci.utah.edu/api/export-anywidget');
 const FRONTEND_TRACE_URL = `${process.env.PUBLIC_URL || ''}/unet3d_a100--verify-1.pfw`;
 const FRONTEND_TRACE_LABEL = 'unet3d_a100--verify-1.pfw';
 const DEFAULT_END_US = 2e15; // Large enough for epoch-microsecond traces (~1.76e15 typical); 100_000_000 would filter out most events
