@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { streamLLMResponse } from '../config/llmConfig';
-import { applyGanttConfigPatch } from '../config/ganttConfig';
+import { applyGanttConfigPatch, mergeDeep } from '../config/ganttConfig';
 import { applyWidgetConfigPatch } from '../config/widgetConfig';
 import {
   parseTrackConfigFromResponse,
@@ -16,7 +16,8 @@ import { normalizeWidget, findConfigItemForPatch } from '../utils/widget';
 import { formatTimeUs } from '../utils/formatting';
 import { getValueAtPath } from '../utils/expression';
 import { validateWidget } from '../config/widgetValidator';
-import type { ProcessSortMode } from '../types/ganttConfig';
+import { normalizeHierarchyFeatures } from '../utils/hierarchy';
+import type { GanttDataMapping, ProcessSortMode } from '../types/ganttConfig';
 
 const MAX_EVENT_PROMPT_CHARS = 1200;
 const MAX_ARRAY_PREVIEW = 20;
@@ -91,6 +92,7 @@ interface UseChatAgentArgs {
   savedImages: Array<{ id: string; dataUrl: string }>;
   messages: any[];
   data: any[];
+  dataMapping: GanttDataMapping | null;
   ganttConfig: any;
   startTime: number;
   endTime: number;
@@ -104,6 +106,7 @@ interface UseChatAgentArgs {
   setInputMessage: (value: string) => void;
   setIsStreaming: (value: boolean) => void;
   setCurrentStreamingMessage: (value: string) => void;
+  setDataMapping: Dispatch<SetStateAction<GanttDataMapping | null>>;
   setGanttConfig: (value: any) => void;
   setProcessSortMode: Dispatch<SetStateAction<ProcessSortMode>>;
   setTracksConfig: (value: any) => void;
@@ -111,6 +114,7 @@ interface UseChatAgentArgs {
   setWidgetConfig: (value: any) => void;
   handleOpenConfigEditor: (item: any, options?: any) => void;
   handleOpenWidgetEditor: (widget: any, options?: any) => void;
+  onApplyDataMapping?: (mapping: GanttDataMapping) => void | Promise<void>;
 }
 
 export function useChatAgent({
@@ -120,6 +124,7 @@ export function useChatAgent({
   savedImages,
   messages,
   data,
+  dataMapping,
   ganttConfig,
   startTime,
   endTime,
@@ -133,13 +138,15 @@ export function useChatAgent({
   setInputMessage,
   setIsStreaming,
   setCurrentStreamingMessage,
+  setDataMapping,
   setGanttConfig,
   setProcessSortMode,
   setTracksConfig,
   setWidgets,
   setWidgetConfig,
   handleOpenConfigEditor,
-  handleOpenWidgetEditor
+  handleOpenWidgetEditor,
+  onApplyDataMapping
 }: UseChatAgentArgs) {
   const handleSendMessage = useCallback(async () => {
     if (!inputMessage.trim() || isStreaming) return;
@@ -179,14 +186,26 @@ export function useChatAgent({
       `tooltip=${ganttConfig?.tooltip?.enabled === false ? 'off' : 'on'}`
     ].join(', ');
     const activeConfigContext = activeConfigItem
-      ? {
-          id: activeConfigItem.id,
-          label: activeConfigItem.label,
-          path: activeConfigItem.path,
-          description: activeConfigItem.description,
-          example: activeConfigItem.example,
-          currentValue: getValueAtPath(ganttConfig, activeConfigItem.path)
-        }
+      ? (() => {
+          const isDataMappingTarget = activeConfigItem?.source === 'dataMapping';
+          const currentValue = isDataMappingTarget
+            ? activeConfigItem?.mappingKey
+              ? dataMapping
+                ? (dataMapping as any)[activeConfigItem.mappingKey]
+                : undefined
+              : dataMapping ?? undefined
+            : activeConfigItem?.path
+              ? getValueAtPath(ganttConfig, activeConfigItem.path)
+              : undefined;
+          return {
+            id: activeConfigItem.id,
+            label: activeConfigItem.label,
+            path: activeConfigItem.path,
+            description: activeConfigItem.description,
+            example: activeConfigItem.example,
+            currentValue
+          };
+        })()
       : null;
     const chartContext = {
       totalTracks: uniqueTracks.length,
@@ -195,7 +214,8 @@ export function useChatAgent({
         data.length > 0 ? `${formatTimeUs(startTime)} to ${formatTimeUs(endTime)}` : 'unknown',
       dataPointCount: data.length,
       configSummary,
-      activeConfigItem: activeConfigContext
+      activeConfigItem: activeConfigContext,
+      dataMapping
     };
 
     // Use widget agent mode toggle instead of regex detection
@@ -214,6 +234,7 @@ export function useChatAgent({
       : buildSystemPrompt({
           schema: dataSchema,
           currentConfig: ganttConfig,
+          dataMapping,
           activeConfigItem: activeConfigContext,
           eventFields,
           sampleEvents,
@@ -256,7 +277,7 @@ export function useChatAgent({
           } else if (configResponse?.action === 'update_gantt_config') {
             try {
               let patchToApply = configResponse.patch;
-              if (activeConfigItem?.path) {
+              if (activeConfigItem?.path && activeConfigItem?.source !== 'dataMapping') {
                 const nextValue = getValueAtPath(configResponse.patch, activeConfigItem.path);
                 if (nextValue === undefined) {
                   setMessages((prev) => [
@@ -309,6 +330,53 @@ export function useChatAgent({
                 {
                   role: 'system',
                   content: `⚠️ Could not apply gantt config update: ${error.message}`
+                }
+              ]);
+            }
+          } else if (configResponse?.action === 'update_data_mapping') {
+            try {
+              if (!dataMapping) {
+                throw new Error('Data mapping is not loaded yet. Load data first, then try again.');
+              }
+              let patch = configResponse.patch;
+              if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+                throw new Error('Data mapping patch must be a JSON object.');
+              }
+              // Some prompts refer to the active target as "dataMapping"; unwrap if the LLM nested the patch.
+              if (
+                (patch as any).dataMapping &&
+                typeof (patch as any).dataMapping === 'object' &&
+                !Array.isArray((patch as any).dataMapping)
+              ) {
+                patch = (patch as any).dataMapping;
+              }
+              const merged = mergeDeep(dataMapping, patch) as GanttDataMapping;
+              const nextMapping = normalizeHierarchyFeatures(merged);
+              setDataMapping(nextMapping);
+              Promise.resolve(onApplyDataMapping?.(nextMapping)).catch((e) => {
+                console.error('Error applying data mapping:', e);
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    role: 'system',
+                    content: `⚠️ Data mapping applied, but reprocessing failed: ${e?.message || e}`
+                  }
+                ]);
+              });
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: 'system',
+                  content: `✅ Data mapping updated: ${configResponse.explanation || configResponse.description || 'Mapping updated successfully'}`
+                }
+              ]);
+            } catch (error: any) {
+              console.error('Error applying data mapping update:', error);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: 'system',
+                  content: `⚠️ Could not apply data mapping update: ${error.message}`
                 }
               ]);
             }
@@ -517,6 +585,7 @@ export function useChatAgent({
     savedImages,
     messages,
     data,
+    dataMapping,
     ganttConfig,
     startTime,
     endTime,
@@ -530,13 +599,15 @@ export function useChatAgent({
     setInputMessage,
     setIsStreaming,
     setCurrentStreamingMessage,
+    setDataMapping,
     setGanttConfig,
     setProcessSortMode,
     setTracksConfig,
     setWidgets,
     setWidgetConfig,
     handleOpenConfigEditor,
-    handleOpenWidgetEditor
+    handleOpenWidgetEditor,
+    onApplyDataMapping
   ]);
 
   const handleKeyPress = useCallback(

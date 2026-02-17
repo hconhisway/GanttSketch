@@ -41,6 +41,7 @@ export interface ConfigAgentOptions {
   eventFields?: string[];
   sampleEvents?: any[];
   currentConfig?: any;
+  dataMapping?: any;
   activeConfigItem?: {
     path: string;
     label: string;
@@ -64,7 +65,7 @@ function isDynamicHierarchyPath(path: string): boolean {
  * Build the system prompt dynamically - NO static placeholders, all real data
  */
 export function buildConfigAgentPrompt(options: ConfigAgentOptions) {
-  const { schema, eventFields, sampleEvents, currentConfig, activeConfigItem, fieldMapping } =
+  const { schema, eventFields, sampleEvents, currentConfig, dataMapping, activeConfigItem, fieldMapping } =
     options;
 
   // Schema info - show original detected fields
@@ -88,6 +89,34 @@ export function buildConfigAgentPrompt(options: ConfigAgentOptions) {
 
   // Format current config
   const configStr = currentConfig ? JSON.stringify(currentConfig, null, 2) : '{}';
+
+  // Format current data mapping (compact to keep prompts small)
+  const mappingStr = dataMapping
+    ? JSON.stringify(
+        {
+          xAxis: dataMapping?.xAxis,
+          yAxis: dataMapping?.yAxis,
+          identity: dataMapping?.identity,
+          color: dataMapping?.color,
+          barLabel: dataMapping?.barLabel,
+          tooltip: {
+            ...dataMapping?.tooltip,
+            fields: Array.isArray(dataMapping?.tooltip?.fields)
+              ? dataMapping.tooltip.fields.slice(0, 14)
+              : dataMapping?.tooltip?.fields
+          },
+          features: dataMapping?.features,
+          schema: dataMapping?.schema
+            ? {
+                dataFormat: dataMapping.schema.dataFormat,
+                notes: dataMapping.schema.notes
+              }
+            : undefined
+        },
+        null,
+        2
+      )
+    : 'No data mapping loaded.';
 
   // Format event fields - ONLY from real data, NO hardcoded fields
   const fieldsArray = Array.isArray(eventFields) ? eventFields : [];
@@ -136,6 +165,9 @@ ${formatConfigIndexForPrompt()}
 ## Current Configuration
 ${configStr}
 
+## Current Data Mapping (controls hierarchy/time/identity fields)
+${mappingStr}
+
 ## Active Config Target (optional)
 ${activeTargetStr}
 
@@ -168,7 +200,12 @@ Common transform patterns:
   - performance.hierarchyNLOD.mergeUtilGap
 
 ## Task
-Based on the user's request, output a config patch.
+Based on the user's request, output EITHER a Gantt config patch OR a data mapping patch.
+
+### When to update Data Mapping vs Gantt Config
+- Use **update_data_mapping** when the user is changing how raw data fields map to the chart (time fields, hierarchy fields/levels, identity fields like name/category/id, etc.).
+  - To add/replace hierarchy levels, update: yAxis.hierarchyFields (outermost to innermost). The app will normalize features.hierarchyLevels and features.hierarchyFields automatically.
+- Use **update_gantt_config** when the user is changing visual rules/styling (ordering rules, lane packing, label rules, tooltip formatting rules, colors, layout, performance knobs).
 
 IMPORTANT:
 1. Only modify the specific config items relevant to the request
@@ -179,7 +216,18 @@ IMPORTANT:
 6. If an Active Config Target is provided, you MUST ONLY update that path
 7. Output ONLY a single JSON block. Do NOT include any extra text
 
-Output format:
+Output formats (choose ONE):
+
+### A) Update Data Mapping
+\`\`\`json
+{
+  "action": "update_data_mapping",
+  "patch": { ... },
+  "explanation": "Brief explanation of what this change does"
+}
+\`\`\`
+
+### B) Update Gantt Config
 \`\`\`json
 {
   "action": "update_gantt_config",
@@ -322,6 +370,7 @@ export function buildSystemPrompt(chartContext: any) {
     eventFields: chartContext.eventFields,
     sampleEvents: chartContext.sampleEvents,
     currentConfig: chartContext.currentConfig,
+    dataMapping: chartContext.dataMapping,
     activeConfigItem: chartContext.activeConfigItem,
     fieldMapping: chartContext.fieldMapping
   });

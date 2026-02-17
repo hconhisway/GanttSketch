@@ -18,6 +18,7 @@ interface ChatInputProps {
   onClear: () => void;
   onCaptureImage: () => void;
   selectedImageId: string | null;
+  onOpenApiConfig?: () => void;
 }
 
 export const ChatInput = React.memo(function ChatInput({
@@ -36,7 +37,8 @@ export const ChatInput = React.memo(function ChatInput({
   setBrushColor,
   onClear,
   onCaptureImage,
-  selectedImageId
+  selectedImageId,
+  onOpenApiConfig
 }: ChatInputProps) {
   return (
     <div className="chat-input-container">
@@ -64,6 +66,17 @@ export const ChatInput = React.memo(function ChatInput({
             <span className="toggle-text">Widget Mode</span>
           </label>
         </div>
+        {onOpenApiConfig && (
+          <button
+            type="button"
+            className="api-config-button"
+            onClick={onOpenApiConfig}
+            title="API Configuration"
+            aria-label="Open API configuration"
+          >
+            ⚙
+          </button>
+        )}
       </div>
       <div className="input-controls-row">
         <button

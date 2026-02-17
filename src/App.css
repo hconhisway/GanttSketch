@@ -7,5 +7,6 @@
 @import './styles/ImageGallery.css';
 @import './styles/ChatInput.css';
 @import './styles/ConfigEditorModal.css';
+@import './styles/ApiConfigModal.css';
 @import './styles/WidgetEditorModal.css';
 @import './styles/DataSetupModal.css';

@@ -157,7 +157,7 @@
     },
     {
       "id": "yAxis",
-      "description": "Hierarchy1 ordering, hierarchy2 lane policy, and labels. Runtime also supports dynamic yAxis.hierarchyNField/hierarchyNLabelRule/hierarchyNLaneRule paths.",
+      "description": "Y-axis configuration, such as hierarchies.",
       "entries": [
         {
           "id": "yAxis.hierarchy1OrderRule",

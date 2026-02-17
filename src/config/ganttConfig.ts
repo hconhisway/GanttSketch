@@ -57,24 +57,26 @@ export const DEFAULT_GANTT_CONFIG: GanttConfig = {
   },
   color: {
     palette: [
-      '#2563EB', // blue
-      '#0EA5E9', // sky
-      '#14B8A6', // teal
-      '#10B981', // emerald
-      '#84CC16', // lime
-      '#F59E0B', // amber
-      '#F97316', // orange
-      '#EF4444', // red
-      '#E11D48', // rose
-      '#DB2777', // pink
-      '#C026D3', // fuchsia
-      '#7C3AED', // violet
-      '#6366F1', // indigo
-      '#0F766E', // deep teal
-      '#16A34A', // green
-      '#CA8A04', // deep amber
-      '#EA580C', // deep orange
-      '#B91C1C' // deep red
+      '#4C78A8', // tableau20
+      '#9ECAE9',
+      '#F58518',
+      '#FFBF79',
+      '#54A24B',
+      '#88D27A',
+      '#B79A20',
+      '#F2CF5B',
+      '#439894',
+      '#83BCB6',
+      '#E45756',
+      '#FF9D98',
+      '#79706E',
+      '#BAB0AC',
+      '#D67195',
+      '#FCBFD2',
+      '#B279A2',
+      '#D6A5C9',
+      '#9E765F',
+      '#D8B5A5'
     ],
     keyRule: {
       type: 'expr',
@@ -258,6 +260,29 @@ function normalizeHierarchy2LabelRule(rule: any): any {
   return rule;
 }
 
+/** Normalize hierarchy N (N>=3) label rule so format is always "fieldName: value". */
+function normalizeHierarchyNLabelRule(level: number, rule: any): any {
+  if (level < 3) return rule;
+  const expr = rule?.type === 'expr' ? rule.expr : rule;
+  if (!expr || typeof expr !== 'object' || expr.op !== 'concat' || !Array.isArray(expr.args)) {
+    return rule;
+  }
+  const args = expr.args;
+  const fieldVar = `hierarchy${level}Field`;
+  const valueVar = `hierarchy${level}`;
+  const hasField = args.some((a: any) => isVarNode(a, fieldVar));
+  const hasValue = args.some((a: any) => isVarNode(a, valueVar));
+  if (!hasField || !hasValue) return rule;
+  const idxField = args.findIndex((a: any) => isVarNode(a, fieldVar));
+  const idxValue = args.findIndex((a: any) => isVarNode(a, valueVar));
+  const idxColon = args.findIndex((a: any) => a === ': ');
+  // Correct order: field, ': ', value. If not, replace with default.
+  if (idxField >= 0 && idxValue >= 0 && idxColon >= 0 && idxField < idxColon && idxColon < idxValue) {
+    return rule;
+  }
+  return buildDefaultHierarchyLabelRule(level);
+}
+
 function getArrayItemKey(item: any): string {
   if (!item || typeof item !== 'object') return '';
   return String(item.id || item.key || item.label || item.name || item.path || '');
@@ -317,7 +342,7 @@ function mergeObjectArray(baseArray: any, patchArray: any): any[] {
   return ordered;
 }
 
-function mergeDeep(base: any, patch: any): any {
+export function mergeDeep(base: any, patch: any): any {
   if (patch === undefined) return base;
   if (Array.isArray(base) && patch && typeof patch === 'object') {
     if (patch.__replace === true) {
@@ -372,7 +397,10 @@ export function normalizeGanttConfig(raw: any): GanttConfig {
       const fieldValue = (y as any)[key];
       if (fieldValue == null || String(fieldValue).trim() === '') return;
       const labelKey = `hierarchy${level}LabelRule`;
-      if ((y as any)[labelKey] == null) {
+      const existingRule = (y as any)[labelKey];
+      if (existingRule != null) {
+        (y as any)[labelKey] = normalizeHierarchyNLabelRule(level, existingRule);
+      } else {
         (y as any)[labelKey] = buildDefaultHierarchyLabelRule(level);
       }
     });

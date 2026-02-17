@@ -218,7 +218,7 @@ export function useChartRenderer({
       const layoutConfig = ganttConfig?.layout || {};
       const yAxisLayout = layoutConfig?.yAxis || {};
       const margin = {
-        top: layoutConfig?.margin?.top ?? 24,
+        top: layoutConfig?.margin?.top ?? 0,
         right: layoutConfig?.margin?.right ?? 24,
         bottom: layoutConfig?.margin?.bottom ?? 24,
         left: layoutConfig?.margin?.left ?? 16
@@ -230,8 +230,6 @@ export function useChartRenderer({
       const threadGap = layoutConfig?.hierarchy2Gap ?? layoutConfig?.threadGap ?? 6;
 
       const yAxisConfig = ganttConfig?.yAxis || {};
-      const PROCESS_INDENT_PX = yAxisLayout?.hierarchy1Indent ?? yAxisLayout?.processIndent ?? 16;
-
       const orderedHierarchy1Ids = orderResult.orderedHierarchy1Ids || [];
       const depthByHierarchy1 = orderResult.depthByHierarchy1 || new Map();
       if (orderedHierarchy1Ids.length === 0) {
@@ -369,13 +367,12 @@ export function useChartRenderer({
 
           let maxPx = 0;
 
-          // Hierarchy1 labels (always visible)
+          // Hierarchy1 labels (always visible; no fork indent)
           ctx.font = (yAxisLayout?.hierarchy1Font ?? yAxisLayout?.processFont) || '700 12px system-ui';
           for (const hierarchy1Id of orderedHierarchy1Ids) {
-            const indentPx = (depthByHierarchy1.get(String(hierarchy1Id)) || 0) * PROCESS_INDENT_PX;
-            const text = getProcessLabel(hierarchy1Id, depthByHierarchy1.get(String(hierarchy1Id)) || 0, false);
+            const text = getProcessLabel(hierarchy1Id, 0, false);
             const w = ctx.measureText(text).width;
-            maxPx = Math.max(maxPx, LEFT_PAD + indentPx + w + RIGHT_PAD);
+            maxPx = Math.max(maxPx, LEFT_PAD + w + RIGHT_PAD);
           }
 
           // Hierarchy2 labels (only for expanded blocks)
@@ -383,13 +380,12 @@ export function useChartRenderer({
           for (const hierarchy1Id of expandedHierarchy1Ids) {
             const threadMap = threadsByHierarchy1.get(hierarchy1Id);
             if (!threadMap) continue;
-            const procIndentPx = (depthByHierarchy1.get(String(hierarchy1Id)) || 0) * PROCESS_INDENT_PX;
             const hierarchy2Ids = Array.from(threadMap.keys());
             for (const hierarchy2Id of hierarchy2Ids) {
               const isMainThread = String(hierarchy2Id) === String(hierarchy1Id);
               const text = getThreadLabel(hierarchy1Id, hierarchy2Id, isMainThread);
               const w = ctx.measureText(text).width;
-              maxPx = Math.max(maxPx, LEFT_PAD + procIndentPx + THREAD_INDENT + w + RIGHT_PAD);
+              maxPx = Math.max(maxPx, LEFT_PAD + THREAD_INDENT + w + RIGHT_PAD);
             }
           }
 
@@ -630,7 +626,11 @@ export function useChartRenderer({
             });
           });
         };
-        const emitLeafLanes = (pathSegments: string[], levelMap: ThreadLevelMap | undefined) => {
+        const emitLeafLanes = (
+          pathSegments: string[],
+          levelMap: ThreadLevelMap | undefined,
+          rowLabel?: string
+        ) => {
           if (!levelMap) return;
           const hierarchy2Path = pathSegments.join('|');
           const isMainThread = hierarchy2Path === String(hierarchy1Id);
@@ -651,7 +651,7 @@ export function useChartRenderer({
                 hierarchyValues: [String(hierarchy1Id), ...pathSegments.map((segment) => String(segment))],
                 level: idx,
                 laneKey,
-                threadLabel: '',
+                threadLabel: idx === 0 ? (rowLabel ?? '') : '',
                 events
               });
             });
@@ -663,7 +663,7 @@ export function useChartRenderer({
             if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
             return String(a).localeCompare(String(b), undefined, { numeric: true });
           });
-          levels.forEach((level) => {
+          levels.forEach((level, idx) => {
             const events = levelMap.get(level) ?? levelMap.get(String(level)) ?? [];
             const laneKey = buildHierarchyLaneKey([hierarchy1Id, ...pathSegments], level);
             lanes.push({
@@ -674,7 +674,7 @@ export function useChartRenderer({
               hierarchyValues: [String(hierarchy1Id), ...pathSegments.map((segment) => String(segment))],
               level,
               laneKey,
-              threadLabel: '',
+              threadLabel: idx === 0 ? (rowLabel ?? '') : '',
               events
             });
           });
@@ -690,6 +690,7 @@ export function useChartRenderer({
             expandedHierarchy1Ids.includes(expandKey) ||
             (path.length === 1 && !hasChildren && hierarchyDepthCount <= 2);
           const showLeafLanes = hasLeaf && (!hasChildren || expanded);
+          const isLeafOnly = hasLeaf && !hasChildren;
           const packedNodeLanes = hasChildren ? buildRuleLanes(node.events) : [];
           const collapsedGroupEvents =
             packedNodeLanes.length > 0 ? packedNodeLanes[0].events : node.events;
@@ -700,21 +701,23 @@ export function useChartRenderer({
             : showLeafLanes
               ? []
               : node.events;
-          const laneKey = buildHierarchyLaneKey([hierarchy1Id, ...path], '__group__');
-          lanes.push({
-            type: 'group',
-            hierarchy1: hierarchy1Id,
-            hierarchy2: path.join('|'),
-            hierarchyPath: [...path],
-            hierarchyValues: [String(hierarchy1Id), ...path.map((segment) => String(segment))],
-            hierarchyDepth: depth,
-            expandKey,
-            expandable,
-            expanded,
-            laneKey,
-            events: groupEvents,
-            label: getHierarchyNodeLabel(hierarchy1Id, path, path.join('|') === String(hierarchy1Id))
-          });
+          if (!isLeafOnly) {
+            const laneKey = buildHierarchyLaneKey([hierarchy1Id, ...path], '__group__');
+            lanes.push({
+              type: 'group',
+              hierarchy1: hierarchy1Id,
+              hierarchy2: path.join('|'),
+              hierarchyPath: [...path],
+              hierarchyValues: [String(hierarchy1Id), ...path.map((segment) => String(segment))],
+              hierarchyDepth: depth,
+              expandKey,
+              expandable,
+              expanded,
+              laneKey,
+              events: groupEvents,
+              label: getHierarchyNodeLabel(hierarchy1Id, path, path.join('|') === String(hierarchy1Id))
+            });
+          }
           if (hasChildren && !expanded && packedNodeLanes.length > 1) {
             emitNodePackedLanes(path, node.events, 1);
           }
@@ -724,7 +727,12 @@ export function useChartRenderer({
             );
             children.forEach((child) => emitNode(child));
           }
-          if (showLeafLanes) emitLeafLanes(path, node.levelMap);
+          if (showLeafLanes) {
+            const rowLabel = isLeafOnly
+              ? getHierarchyNodeLabel(hierarchy1Id, path, path.join('|') === String(hierarchy1Id))
+              : undefined;
+            emitLeafLanes(path, node.levelMap, rowLabel);
+          }
         };
         const roots = Array.from(root.children.values()).sort((a, b) =>
           String(a.segment).localeCompare(String(b.segment), undefined, { numeric: true })
@@ -752,14 +760,13 @@ export function useChartRenderer({
 
       orderedHierarchy1Ids.forEach((hierarchy1Id) => {
         const depth = depthByHierarchy1.get(String(hierarchy1Id)) || 0;
-        const indentPx = depth * PROCESS_INDENT_PX;
         const expanded = expandedHierarchy1Ids.includes(hierarchy1Id);
         if (!expanded) {
           blocks.push({
             hierarchy1: hierarchy1Id,
             expanded: false,
             depth,
-            indentPx,
+            indentPx: 0,
             y0: yCursor,
             y1: yCursor + headerHeight,
             headerY0: yCursor,
@@ -780,7 +787,7 @@ export function useChartRenderer({
           hierarchy1: hierarchy1Id,
           expanded: true,
           depth,
-          indentPx,
+          indentPx: 0,
           y0: yCursor,
           y1: yCursor + blockHeight,
           headerY0: yCursor,
@@ -800,6 +807,57 @@ export function useChartRenderer({
         blocks.push(block);
         yCursor = block.y1;
       });
+
+      // Fork groups: parent + children as table-like segments (no indent; background + header style)
+      const forkRelations = forkRelationsRef.current;
+      const parentByHierarchy1 =
+        forkRelations?.parentByHierarchy1 instanceof Map
+          ? forkRelations.parentByHierarchy1
+          : new Map<string, string>();
+      type ForkGroup = { startBlockIndex: number; endBlockIndex: number; parentBlockIndex: number };
+      const forkGroups: ForkGroup[] = [];
+      const headerIdToGroupIndex: Record<string, number> = {};
+      orderedHierarchy1Ids.forEach((id, i) => {
+        const parent = parentByHierarchy1.get(String(id));
+        if (!parent) {
+          forkGroups.push({ startBlockIndex: i, endBlockIndex: i, parentBlockIndex: i });
+          headerIdToGroupIndex[String(id)] = forkGroups.length - 1;
+        } else {
+          const gIdx = headerIdToGroupIndex[String(parent)];
+          if (gIdx != null) {
+            forkGroups[gIdx].endBlockIndex = i;
+          } else {
+            forkGroups.push({ startBlockIndex: i, endBlockIndex: i, parentBlockIndex: i });
+            headerIdToGroupIndex[String(id)] = forkGroups.length - 1;
+          }
+        }
+      });
+      const hasForkStructure = forkGroups.some(
+        (g) => g.endBlockIndex > g.startBlockIndex
+      );
+
+      const GAP_BETWEEN_FORK_GROUPS = 12;
+      const FORK_CARD_RADIUS = 8;
+      const FORK_CARD_STROKE = 'rgba(0,0,0,0.08)';
+      if (hasForkStructure && forkGroups.length > 0) {
+        const gapBeforeBlock = (blockIndex: number) =>
+          GAP_BETWEEN_FORK_GROUPS * forkGroups.filter((g) => g.endBlockIndex < blockIndex).length;
+        blocks.forEach((block, i) => {
+          const offset = gapBeforeBlock(i);
+          if (offset <= 0) return;
+          block.y0 += offset;
+          block.y1 += offset;
+          block.headerY0 += offset;
+          block.headerY1 += offset;
+          if (block.detailY0 != null) block.detailY0 += offset;
+          if (block.detailY1 != null) block.detailY1 += offset;
+          block.lanes.forEach((lane: any) => {
+            lane.y0 += offset;
+            lane.y1 += offset;
+          });
+        });
+        yCursor += forkGroups.length * GAP_BETWEEN_FORK_GROUPS;
+      }
 
       const stageHeight = yCursor + margin.bottom;
 
@@ -898,32 +956,44 @@ export function useChartRenderer({
         container.appendChild(svgNode);
       }
 
-      const yAxisHost = yAxisRef.current;
+      let yAxisHost: HTMLDivElement | null = yAxisRef.current;
       let yAxisGroup: d3.Selection<SVGGElement, any, null, undefined> | null = null;
       let yAxisTooltipEl: HTMLDivElement | null = null;
-      if (yAxisHost) {
-        yAxisHost.innerHTML = '';
+      let yAxisSeparatorEl: HTMLDivElement | null = null;
+      const viewportHeight = Math.max(100, container.clientHeight || 400);
+      const ensureYAxis = () => {
+        const host = yAxisHost || yAxisRef.current;
+        if (!host || yAxisGroup) return;
+        yAxisHost = host;
+        host.innerHTML = '';
+        const vh = Math.max(100, container.clientHeight || 400);
         const axisSvg = d3
           .create('svg')
           .attr('class', 'gantt-yaxis-svg')
           .attr('width', Y_AXIS_WIDTH)
-          .attr('height', stageHeight)
+          .attr('height', vh)
           .style('width', `${Y_AXIS_WIDTH}px`)
-          .style('height', `${stageHeight}px`)
+          .style('height', `${vh}px`)
           .style('overflow', 'visible');
         yAxisGroup = axisSvg.append('g').attr('class', 'y-labels');
         const axisNode = axisSvg.node();
         if (axisNode) {
-          yAxisHost.appendChild(axisNode);
+          host.appendChild(axisNode);
         }
+        yAxisSeparatorEl = document.createElement('div');
+        yAxisSeparatorEl.className = 'gantt-yaxis-separator';
+        yAxisSeparatorEl.style.top = '0';
+        yAxisSeparatorEl.style.height = `${vh}px`;
+        host.appendChild(yAxisSeparatorEl);
         yAxisTooltipEl = document.createElement('div');
         yAxisTooltipEl.className = 'gantt-yaxis-tooltip';
         yAxisTooltipEl.style.cssText = 'position:fixed;display:none;font-size:12px;font-weight:500;font-family:system-ui;background:#333;color:#fff;padding:6px 10px;border-radius:4px;pointer-events:none;z-index:1000;max-width:420px;white-space:normal;line-height:1.3;box-shadow:0 2px 8px rgba(0,0,0,0.2);';
-        yAxisHost.appendChild(yAxisTooltipEl);
-        yAxisHost.style.width = `${Y_AXIS_WIDTH}px`;
-        yAxisHost.style.height = `${stageHeight}px`;
-        yAxisHost.style.top = `${container.offsetTop}px`;
-      }
+        host.appendChild(yAxisTooltipEl);
+        host.style.width = `${Y_AXIS_WIDTH}px`;
+        host.style.height = `${vh}px`;
+        host.style.top = `${container.offsetTop}px`;
+      };
+      ensureYAxis();
 
       // Tooltip
       const tooltip = document.createElement('div');
@@ -1210,7 +1280,7 @@ export function useChartRenderer({
         hoveredTrack: null,
         hoveredItem: null
       };
-      let lastLanePositions = new Map<string, { y: number; h: number; indent: number }>();
+      let lastLanePositions = new Map<string, { y: number; h: number }>();
       let lastGpuUploadMs: number | null = null;
       let lastRendererMode: 'webgl' | 'canvas' = 'canvas';
       let lastWebglInstanceCount: number | null = null;
@@ -1395,7 +1465,6 @@ export function useChartRenderer({
         for (let i = bufferedStart; i <= bufferedEnd; i++) {
           const block = blocks[i];
           if (!block || !block.expanded) continue;
-          const indent = Number(block.indentPx) || 0;
           block.lanes.forEach((lane: any) => {
             if (lane.type !== 'lane' && lane.type !== 'group') return;
             if (lane.y1 < yMin || lane.y0 > yMax) return;
@@ -1411,7 +1480,7 @@ export function useChartRenderer({
                   lane.type === 'group' ? '__group__' : lane.level ?? 0
                 )
             );
-            lanePositions.set(laneKey, { y: lane.y0, h: lane.y1 - lane.y0, indent });
+            lanePositions.set(laneKey, { y: lane.y0, h: lane.y1 - lane.y0 });
           });
         }
         lastLanePositions = lanePositions;
@@ -1445,8 +1514,9 @@ export function useChartRenderer({
               const laneKey = meta.laneKeys[laneIndex];
               const lanePos = lanePositions.get(laneKey);
               if (!lanePos) continue;
-              const x1 = (xOf(soa.starts[i], p) + lanePos.indent) * pixelRatio;
-              const x2 = (xOf(soa.ends[i], p) + lanePos.indent) * pixelRatio;
+              const x1 = xOf(soa.starts[i], p) * pixelRatio;
+              const x2 = xOf(soa.ends[i], p) * pixelRatio;
+              if (x2 - x1 < 0.5 * pixelRatio) continue; // Skip sub-pixel bars (phantom strips)
               const y = (lanePos.y + lanePadding) * pixelRatio;
               const h = Math.max(2, lanePos.h - lanePadding * 2) * pixelRatio;
               const offset = instanceCount * 6;
@@ -1480,16 +1550,87 @@ export function useChartRenderer({
           }
         }
 
+        const FORK_GROUP_FILL = '#e8eaf0';
+        const FORK_HEADER_FILL = '#d0d6e8';
+        const drawRoundRect = (
+          cx: CanvasRenderingContext2D,
+          x: number,
+          y: number,
+          w: number,
+          h: number,
+          r: number
+        ) => {
+          if (r <= 0 || h < 2 * r) {
+            cx.rect(x, y, w, h);
+            return;
+          }
+          cx.beginPath();
+          cx.moveTo(x + r, y);
+          cx.lineTo(x + w - r, y);
+          cx.arcTo(x + w, y, x + w, y + r, r);
+          cx.lineTo(x + w, y + h - r);
+          cx.arcTo(x + w, y + h, x + w - r, y + h, r);
+          cx.lineTo(x + r, y + h);
+          cx.arcTo(x, y + h, x, y + h - r, r);
+          cx.lineTo(x, y + r);
+          cx.arcTo(x, y, x + r, y, r);
+          cx.closePath();
+        };
+        if (hasForkStructure) {
+        forkGroups.forEach((g) => {
+          const startBlock = blocks[g.startBlockIndex];
+          const endBlock = blocks[g.endBlockIndex];
+          if (!startBlock || !endBlock || endBlock.y1 < yMin || startBlock.y0 > yMax) return;
+          const groupY0 = Math.max(yMin, startBlock.y0);
+          const groupY1 = Math.min(yMax, endBlock.y1);
+          const cardH = groupY1 - groupY0;
+          const fullW = margin.left + innerWidth + margin.right;
+          const radius = Math.min(FORK_CARD_RADIUS, cardH / 2);
+          drawRoundRect(ctx, 0, groupY0, fullW, cardH, radius);
+          ctx.fillStyle = FORK_GROUP_FILL;
+          ctx.fill();
+          ctx.strokeStyle = FORK_CARD_STROKE;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        });
+        forkGroups.forEach((g) => {
+          const parentBlock = blocks[g.parentBlockIndex];
+          if (!parentBlock || parentBlock.headerY1 < yMin || parentBlock.headerY0 > yMax) return;
+          ctx.fillStyle = FORK_HEADER_FILL;
+          ctx.fillRect(
+            0,
+            parentBlock.headerY0,
+            margin.left + innerWidth + margin.right,
+            headerHeight
+          );
+        });
+        }
+
         for (let i = startIdx; i < blocks.length; i++) {
           if (budgetExceeded) break;
           const block = blocks[i];
           if (block.y0 > yMax) break;
 
-          const blockIndentPx = Number(block.indentPx) || 0;
+          const forkGroup = hasForkStructure
+            ? forkGroups.find(
+                (g) => g.startBlockIndex <= i && i <= g.endBlockIndex
+              )
+            : undefined;
+          const isForkGroupHeader = forkGroup?.parentBlockIndex === i;
+          const headerFill =
+            forkGroup != null
+              ? isForkGroupHeader
+                ? FORK_HEADER_FILL
+                : FORK_GROUP_FILL
+              : block.expanded
+                ? '#eef2ff'
+                : i % 2 === 0
+                  ? '#fbfbfb'
+                  : '#f4f4f4';
 
           // Header background (full width)
           const headerIsHovered = visibleState.hoveredTrack === `proc-${block.hierarchy1}`;
-          ctx.fillStyle = block.expanded ? '#eef2ff' : i % 2 === 0 ? '#fbfbfb' : '#f4f4f4';
+          ctx.fillStyle = headerFill;
           ctx.fillRect(0, block.headerY0, margin.left + innerWidth + margin.right, headerHeight);
           if (headerIsHovered) {
             ctx.fillStyle = 'rgba(102, 126, 234, 0.12)';
@@ -1499,11 +1640,11 @@ export function useChartRenderer({
           const merged = processAggregates.get(block.hierarchy1) || [];
 
           if (!block.expanded) {
-            // Collapsed: draw merged process bars in header row
+            // Collapsed: draw merged process bars in header row (timeline aligned to time axis, no indent)
             const y = block.headerY0 + 2;
             const h = headerHeight - 4;
-            const leftBound = margin.left + blockIndentPx;
-            const rightBound = margin.left + innerWidth + blockIndentPx;
+            const leftBound = margin.left;
+            const rightBound = margin.left + innerWidth;
             // Collapsed view: render each pixel at most once.
             // Events may come from multiple threads that overlap in time,
             // but the collapsed bar should be uniform — clip each event
@@ -1516,9 +1657,11 @@ export function useChartRenderer({
                 budgetExceeded = true;
                 return;
               }
-              const x1Raw = xOf(item.start ?? item.timeStart ?? 0, p) + blockIndentPx;
-              const x2Raw = xOf(item.end ?? item.timeEnd ?? 0, p) + blockIndentPx;
+              const x1Raw = xOf(item.start ?? item.timeStart ?? 0, p);
+              const x2Raw = xOf(item.end ?? item.timeEnd ?? 0, p);
               if (x2Raw < leftBound || x1Raw > rightBound) return;
+              // Skip sub-pixel bars to avoid phantom strips at axis boundaries
+              if (x2Raw - x1Raw < 0.5) return;
               const x1 = Math.floor(x1Raw);
               const endPx = Math.max(x1 + 1, Math.ceil(x2Raw));
               // Only render the portion beyond what's already covered
@@ -1535,12 +1678,12 @@ export function useChartRenderer({
             continue;
           }
 
-          // Expanded: draw a detail box (width based on process time extent), then draw lane events inside.
+          // Expanded: draw a detail box (width based on process time extent), then draw lane events inside (timeline aligned, no indent).
           if (merged.length > 0) {
             const minT = merged[0].start ?? merged[0].timeStart;
             const maxT = merged[merged.length - 1].end ?? merged[merged.length - 1].timeEnd;
-            const boxX1 = xOf(minT, p) + blockIndentPx;
-            const boxX2 = xOf(maxT, p) + blockIndentPx;
+            const boxX1 = xOf(minT, p);
+            const boxX2 = xOf(maxT, p);
             const boxY0 = block.headerY0 + 1;
             const boxY1 = block.y1 - 1;
             const boxW = Math.max(6, boxX2 - boxX1);
@@ -1618,9 +1761,11 @@ export function useChartRenderer({
                 const tStart = ev.start ?? ev.timeStart ?? 0;
                 const tEnd = ev.end ?? ev.timeEnd ?? 0;
                 const isSummary = ev?.kind === 'summary';
-                const x1Raw = xOf(tStart, p) + blockIndentPx;
-                const x2Raw = xOf(tEnd, p) + blockIndentPx;
+                const x1Raw = xOf(tStart, p);
+                const x2Raw = xOf(tEnd, p);
                 if (x2Raw < boxX1 || x1Raw > boxX1 + boxW) return;
+                // Skip sub-pixel bars to avoid phantom strips at axis boundaries
+                if (x2Raw - x1Raw < 0.5) return;
 
                 // Snap to integer pixels with consistent rounding
                 const x1 = Math.floor(x1Raw);
@@ -1753,6 +1898,7 @@ export function useChartRenderer({
               .axisBottom(scale)
               .ticks(tickCount)
               .tickFormat((d) => axisTimeFormat(d as number))
+              // .tickSizeOuter(0)
           );
           minimapAxisGroup.selectAll('text').style('font-size', '10px').style('fill', '#6b7280');
           minimapAxisGroup.selectAll('path,line').style('stroke', '#d1d5db');
@@ -1770,6 +1916,7 @@ export function useChartRenderer({
               .axisBottom(scale)
               .ticks(tickCount)
               .tickFormat((d) => axisTimeFormat(d as number))
+              // .tickSizeOuter(0)
           );
           axisGroup.selectAll('text').style('font-size', '12px').style('fill', '#555');
           axisGroup.selectAll('path,line').style('stroke', '#d0d0d0');
@@ -1818,7 +1965,7 @@ export function useChartRenderer({
         const selectedLane = lastLanePositions.get(selectedKey);
         if (!selectedLane) return;
         const p = getViewParams();
-        const sx = xOf(selected.start, p) + selectedLane.indent;
+        const sx = xOf(selected.start, p);
         const sy = selectedLane.y + selectedLane.h / 2;
 
         dependencyLayer
@@ -1837,7 +1984,7 @@ export function useChartRenderer({
             );
             const depLane = lastLanePositions.get(depKey);
             if (!depLane) return '';
-            const tx = xOf(ev.start, p) + depLane.indent;
+            const tx = xOf(ev.start, p);
             const ty = depLane.y + depLane.h / 2;
             const mx = (sx + tx) / 2;
             return `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`;
@@ -1848,9 +1995,19 @@ export function useChartRenderer({
       };
 
       const renderYLabels = () => {
+        ensureYAxis();
         if (!yAxisGroup) return;
+        const vh = Math.max(100, container.clientHeight || 400);
+        if (yAxisHost) {
+          yAxisHost.style.height = `${vh}px`;
+          const yAxisSvg = yAxisHost.querySelector('svg');
+          if (yAxisSvg) {
+            yAxisSvg.setAttribute('height', String(vh));
+            yAxisSvg.style.setProperty('height', `${vh}px`);
+          }
+        }
         const yMin = container.scrollTop;
-        const yMax = yMin + container.clientHeight;
+        const yMax = yMin + (container.clientHeight || vh);
         const scrollY = container.scrollTop;
 
         // Binary search for first visible block
@@ -1866,6 +2023,18 @@ export function useChartRenderer({
             hi = mid - 1;
           }
         }
+        let endIdx = startIdx;
+        for (let i = startIdx; i < blocks.length; i++) {
+          if (blocks[i].y0 > yMax) break;
+          endIdx = i;
+        }
+        if (yAxisSeparatorEl && blocks[startIdx] && blocks[endIdx]) {
+          const sepTop = blocks[startIdx].y0 - scrollY;
+          const sepBottom = blocks[endIdx].y1 - scrollY;
+          const sepH = Math.max(0, sepBottom - sepTop);
+          yAxisSeparatorEl.style.top = `${sepTop}px`;
+          yAxisSeparatorEl.style.height = `${sepH}px`;
+        }
 
         const labels: Array<{
           key: string;
@@ -1880,36 +2049,91 @@ export function useChartRenderer({
           symbol?: string;
           symbolWidth?: number;
         }> = [];
-        const bgRects: Array<{ key: string; y: number; h: number; fill: string }> = [];
+        const bgRects: Array<{
+          key: string;
+          y: number;
+          h: number;
+          fill: string;
+          rx?: number;
+          ry?: number;
+          stroke?: string;
+        }> = [];
+        const FORK_GROUP_FILL_Y = '#e8eaf0';
+        const FORK_HEADER_FILL_Y = '#d0d6e8';
+
+        if (hasForkStructure) {
+          forkGroups.forEach((g, gi) => {
+            const startBlock = blocks[g.startBlockIndex];
+            const endBlock = blocks[g.endBlockIndex];
+            if (!startBlock || !endBlock || endBlock.y1 < yMin || startBlock.y0 > yMax) return;
+            const groupY = startBlock.y0 - scrollY;
+            const groupH = endBlock.y1 - startBlock.y0;
+            const radius = Math.min(FORK_CARD_RADIUS, groupH / 2);
+            bgRects.push({
+              key: `bg-forkgroup-${gi}`,
+              y: groupY,
+              h: groupH,
+              fill: FORK_GROUP_FILL_Y,
+              rx: radius,
+              ry: radius,
+              stroke: FORK_CARD_STROKE
+            });
+          });
+          forkGroups.forEach((g, gi) => {
+            const parentBlock = blocks[g.parentBlockIndex];
+            if (!parentBlock || parentBlock.headerY1 < yMin || parentBlock.headerY0 > yMax) return;
+            bgRects.push({
+              key: `bg-forkheader-${gi}`,
+              y: parentBlock.headerY0 - scrollY,
+              h: headerHeight,
+              fill: FORK_HEADER_FILL_Y
+            });
+          });
+        }
 
         for (let i = startIdx; i < blocks.length; i++) {
           const block = blocks[i];
           if (block.y0 > yMax) break;
 
-          const blockIndentPx = Number(block.indentPx) || 0;
+          const forkGroupY = hasForkStructure
+            ? forkGroups.find(
+                (g) => g.startBlockIndex <= i && i <= g.endBlockIndex
+              )
+            : undefined;
+          const blockFill =
+            forkGroupY != null
+              ? forkGroupY.parentBlockIndex === i
+                ? FORK_HEADER_FILL_Y
+                : FORK_GROUP_FILL_Y
+              : block.expanded
+                ? '#eef2ff'
+                : i % 2 === 0
+                  ? '#fbfbfb'
+                  : '#f4f4f4';
 
-          // Background fill for the left Y-axis column to match viewport zebra rows / expanded highlight.
-          if (block.expanded) {
-            bgRects.push({
-              key: `bg-proc-${block.hierarchy1}`,
-              y: block.y0 - scrollY,
-              h: block.y1 - block.y0,
-              fill: '#eef2ff'
-            });
-          } else {
-            bgRects.push({
-              key: `bg-proc-${block.hierarchy1}`,
-              y: block.headerY0 - scrollY,
-              h: headerHeight,
-              fill: i % 2 === 0 ? '#fbfbfb' : '#f4f4f4'
-            });
+          if (forkGroupY == null) {
+            if (block.expanded) {
+              bgRects.push({
+                key: `bg-proc-${block.hierarchy1}`,
+                y: block.y0 - scrollY,
+                h: block.y1 - block.y0,
+                fill: blockFill
+              });
+            } else {
+              bgRects.push({
+                key: `bg-proc-${block.hierarchy1}`,
+                y: block.headerY0 - scrollY,
+                h: headerHeight,
+                fill: blockFill
+              });
+            }
           }
 
           const processLabelFull = getProcessLabel(block.hierarchy1, block.depth, block.expanded);
           const procFw = block.expanded ? 700 : 600;
           const { symbol: procSymbol, body: processBody } = getSymbolAndBody(processLabelFull);
           const procSymbolW = measureSymbolWidth(procSymbol, procFw);
-          const processAvailW = Y_AXIS_WIDTH - LEFT_PAD - RIGHT_PAD - blockIndentPx - procSymbolW;
+          const processAvailW = Y_AXIS_WIDTH - LEFT_PAD - RIGHT_PAD - procSymbolW;
           const processFit = fitYAxisLabel(
             processBody,
             procFw,
@@ -1924,7 +2148,7 @@ export function useChartRenderer({
             y: block.headerY0 + headerHeight / 2 - scrollY,
             fontSize: processFit.fontSize,
             fontWeight: procFw,
-            indent: blockIndentPx,
+            indent: 0,
             fullText: processLabelFull,
             symbol: procSymbol || undefined,
             symbolWidth: procSymbolW || undefined
@@ -1935,7 +2159,6 @@ export function useChartRenderer({
               if (lane.type === 'group') {
                 if (lane.y1 < yMin || lane.y0 > yMax) return;
                 const groupIndent =
-                  blockIndentPx +
                   THREAD_INDENT +
                   Math.max(0, Number(lane.hierarchyDepth || 1) - 1) * 12;
                 const groupBaseLabel = String(lane.label ?? lane.hierarchy2 ?? '');
@@ -1962,9 +2185,11 @@ export function useChartRenderer({
               if (lane.type !== 'lane') return;
               if (lane.y1 < yMin || lane.y0 > yMax) return;
 
-              // Only show thread label once (no L1/L2 labels)
+              // Only show thread label once (no L1/L2 labels); match group indent for leaf depth
               if (lane.threadLabel) {
-                const laneIndent = blockIndentPx + THREAD_INDENT;
+                const depth = Math.max(1, Array.isArray(lane.hierarchyPath) ? lane.hierarchyPath.length : 1);
+                const laneIndent =
+                  THREAD_INDENT + Math.max(0, depth - 1) * 12;
                 const laneAvailW = Y_AXIS_WIDTH - LEFT_PAD - RIGHT_PAD - laneIndent;
                 const laneFit = fitYAxisLabel(
                   lane.threadLabel,
@@ -1997,7 +2222,11 @@ export function useChartRenderer({
           .attr('y', (d) => d.y)
           .attr('width', Y_AXIS_WIDTH)
           .attr('height', (d) => d.h)
-          .attr('fill', (d) => d.fill);
+          .attr('rx', (d) => d.rx ?? 0)
+          .attr('ry', (d) => d.ry ?? 0)
+          .attr('fill', (d) => d.fill)
+          .attr('stroke', (d) => d.stroke ?? 'none')
+          .attr('stroke-width', (d) => (d.stroke ? 1 : 0));
 
         const labelGroups = yAxisGroup
           .selectAll('g.y-label')
@@ -2107,8 +2336,7 @@ export function useChartRenderer({
         if (!block) return null;
 
         const p = getViewParams();
-        const blockIndentPx = Number(block.indentPx) || 0;
-        const time = tOf(Number(x) - blockIndentPx, p);
+        const time = tOf(Number(x), p);
 
         // Header area
         if (y >= block.headerY0 && y <= block.headerY1) {

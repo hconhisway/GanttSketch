@@ -26,6 +26,7 @@ import { ConfigPanel } from './components/config/ConfigPanel';
 import { ChatMessages } from './components/chat/ChatMessages';
 import { ImageGallery } from './components/ImageGallery';
 import { ChatInput } from './components/chat/ChatInput';
+import { ApiConfigModal } from './components/chat/ApiConfigModal';
 import { ConfigEditorModal } from './components/config/ConfigEditorModal';
 import { DataSetupModal } from './components/config/DataSetupModal';
 import { WidgetEditorModal } from './components/widget/WidgetEditorModal';
@@ -47,6 +48,12 @@ import type { Widget, WidgetConfig } from './types/widget';
 import type { ViewState } from './types/viewState';
 import type { SpanSoAChunkBundle } from './utils/soaBuffers';
 import { perfMetrics } from './utils/perfMetrics';
+import {
+  loadSessionState,
+  saveSessionState,
+  parseSessionIdFromHash
+} from './utils/sessionStore';
+import { getLLMConfig, setLLMConfig } from './config/llmConfig';
 
 type ViewRange = { start: number; end: number };
 type WidgetBinding = { element: Element; event: string; handler: EventListener };
@@ -203,6 +210,7 @@ function App() {
   const [localTraceText, setLocalTraceText] = useState('');
   const [localTraceName, setLocalTraceName] = useState('');
   const [showUploadPrompt, setShowUploadPrompt] = useState(false);
+  const [showApiConfig, setShowApiConfig] = useState(false);
   const configFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Image storage for LLM
@@ -542,6 +550,117 @@ function App() {
     setWidgets,
     setMessages
   });
+
+  // Session load: hydrate from IndexedDB on mount (Perfetto-style per-session isolation)
+  const sessionLoadedRef = useRef(false);
+  useEffect(() => {
+    if (sessionLoadedRef.current) return;
+    sessionLoadedRef.current = true;
+    const sessionId = parseSessionIdFromHash();
+    if (!sessionId) return;
+    loadSessionState(sessionId).then((state) => {
+      if (!state) return;
+      if (state.localTraceText !== undefined) setLocalTraceText(state.localTraceText);
+      if (state.localTraceName !== undefined) setLocalTraceName(state.localTraceName);
+      if (state.dataMapping !== undefined) setDataMapping(state.dataMapping as GanttDataMapping);
+      if (state.ganttConfig !== undefined)
+        setGanttConfig(normalizeGanttConfig(state.ganttConfig as GanttConfig));
+      if (state.tracksConfig !== undefined) setTracksConfig(state.tracksConfig as TracksConfig);
+      if (state.widgetConfig !== undefined) setWidgetConfig(state.widgetConfig as WidgetConfig);
+      if (state.widgets !== undefined) setWidgets(state.widgets as Widget[]);
+      if (state.messages !== undefined) setMessages(state.messages as ChatMessage[]);
+      if (state.llmConfig && Object.keys(state.llmConfig).length > 0) {
+        const c = state.llmConfig;
+        const current = getLLMConfig();
+        setLLMConfig({
+          provider: c.provider ? { ...current.provider, name: c.provider } : undefined,
+          apiKey: c.apiKey,
+          apiEndpoint: c.apiEndpoint,
+          model: c.model,
+          temperature: c.temperature,
+          maxTokens: c.maxTokens,
+          useMaxCompletionParam: c.useMaxCompletionParam
+        });
+      }
+    }).catch((err) => console.warn('Session load failed:', err));
+  }, []);
+
+  // Debounced session save: persist state to IndexedDB when it changes
+  const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const sessionId = parseSessionIdFromHash();
+    if (!sessionId) return;
+    if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+    saveDebounceRef.current = setTimeout(() => {
+      const cfg = getLLMConfig();
+      saveSessionState(sessionId, {
+        localTraceText,
+        localTraceName,
+        dataMapping,
+        ganttConfig,
+        tracksConfig,
+        widgetConfig,
+        widgets,
+        messages,
+        llmConfig: {
+          provider: cfg.provider.name,
+          apiKey: cfg.apiKey,
+          apiEndpoint: cfg.apiEndpoint,
+          model: cfg.model,
+          temperature: cfg.temperature,
+          maxTokens: cfg.maxTokens,
+          useMaxCompletionParam: cfg.useMaxCompletionParam
+        }
+      }).catch((err) => console.warn('Session save failed:', err));
+      saveDebounceRef.current = null;
+    }, 800);
+    return () => {
+      if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+    };
+  }, [
+    localTraceText,
+    localTraceName,
+    dataMapping,
+    ganttConfig,
+    tracksConfig,
+    widgetConfig,
+    widgets,
+    messages
+  ]);
+
+  const saveSessionNow = useCallback(() => {
+    const sessionId = parseSessionIdFromHash();
+    if (!sessionId) return;
+    const cfg = getLLMConfig();
+    saveSessionState(sessionId, {
+      localTraceText,
+      localTraceName,
+      dataMapping,
+      ganttConfig,
+      tracksConfig,
+      widgetConfig,
+      widgets,
+      messages,
+      llmConfig: {
+        provider: cfg.provider.name,
+        apiKey: cfg.apiKey,
+        apiEndpoint: cfg.apiEndpoint,
+        model: cfg.model,
+        temperature: cfg.temperature,
+        maxTokens: cfg.maxTokens,
+        useMaxCompletionParam: cfg.useMaxCompletionParam
+      }
+    }).catch((err) => console.warn('Session save failed:', err));
+  }, [
+    localTraceText,
+    localTraceName,
+    dataMapping,
+    ganttConfig,
+    tracksConfig,
+    widgetConfig,
+    widgets,
+    messages
+  ]);
 
   const { streamingStats } = useDataFetching({
     obd,
@@ -955,6 +1074,7 @@ function App() {
     savedImages,
     messages,
     data,
+    dataMapping,
     ganttConfig,
     startTime,
     endTime,
@@ -968,13 +1088,15 @@ function App() {
     setInputMessage,
     setIsStreaming,
     setCurrentStreamingMessage,
+    setDataMapping,
     setGanttConfig,
     setProcessSortMode,
     setTracksConfig,
     setWidgets,
     setWidgetConfig,
     handleOpenConfigEditor,
-    handleOpenWidgetEditor
+    handleOpenWidgetEditor,
+    onApplyDataMapping: applyMappingToRawEvents
   });
 
   if (loading && (!data || data.length === 0)) {
@@ -1146,6 +1268,7 @@ function App() {
             onClear={handleClear}
             onCaptureImage={handleCaptureImage}
             selectedImageId={selectedImageId}
+            onOpenApiConfig={() => setShowApiConfig(true)}
           />
 
           <input
@@ -1154,6 +1277,12 @@ function App() {
             accept=".json,application/json"
             style={{ display: 'none' }}
             onChange={handleConfigFileChange}
+          />
+
+          <ApiConfigModal
+            open={showApiConfig}
+            onClose={() => setShowApiConfig(false)}
+            onSave={saveSessionNow}
           />
 
           <ConfigEditorModal

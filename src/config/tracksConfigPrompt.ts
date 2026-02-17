@@ -102,6 +102,10 @@ export function parseTrackConfigFromResponse(responseText: string) {
       return parsed;
     }
 
+    if (parsed.action === 'update_data_mapping' && parsed.patch) {
+      return parsed;
+    }
+
     if (parsed.action === 'create_widget' && parsed.widget) {
       return parsed;
     }
