@@ -268,13 +268,13 @@ export function useChartRenderer({
       const hierarchyFieldDisplays = hierarchyFields.map((field) => resolveFieldDisplayName(String(field)));
       const buildHierarchyVars = (values: string[]) => {
         const vars: Record<string, string | boolean | number> = {};
-        values.forEach((value, index) => {
+        for (let index = 0; index < values.length; index++) {
           const level = index + 1;
-          vars[getHierarchyVarName(level)] = value;
+          vars[getHierarchyVarName(level)] = values[index];
           vars[getHierarchyFieldVarName(level)] =
             hierarchyFieldDisplays[index] ??
             (level === 1 ? hierarchy1FieldDisplay : hierarchy2FieldDisplay);
-        });
+        }
         return vars;
       };
 
@@ -467,7 +467,8 @@ export function useChartRenderer({
         });
         const lanes: any[] = [];
         const laneEnds: number[] = [];
-        sorted.forEach((ev) => {
+        for (let si = 0; si < sorted.length; si++) {
+          const ev = sorted[si];
           let placedIndex = -1;
           for (let i = 0; i < laneEnds.length; i += 1) {
             if ((ev.start ?? 0) >= laneEnds[i]) {
@@ -482,7 +483,7 @@ export function useChartRenderer({
             laneEnds[placedIndex] = Math.max(laneEnds[placedIndex], ev.end ?? 0);
             lanes[placedIndex].push(ev);
           }
-        });
+        }
         return lanes;
       };
       const getLaneKeyValue = (ev: any, path: string): unknown => {
@@ -504,11 +505,17 @@ export function useChartRenderer({
       const buildRuleLanes = (events: any[]): Array<{ laneId: string | number; events: any[] }> => {
         if (!Array.isArray(events) || events.length === 0) return [];
         if (threadOrderMode === 'auto') {
-          return buildAutoLanes(events).map((arr, idx) => ({ laneId: idx, events: arr }));
+          const autoLanes = buildAutoLanes(events);
+          const out: Array<{ laneId: string | number; events: any[] }> = [];
+          for (let idx = 0; idx < autoLanes.length; idx++) {
+            out.push({ laneId: idx, events: autoLanes[idx] });
+          }
+          return out;
         }
         const byLevel = new Map<string | number, any[]>();
         const useFieldLanes = threadLaneFieldPath.length > 0;
-        events.forEach((ev) => {
+        for (let ei = 0; ei < events.length; ei++) {
+          const ev = events[ei];
           let laneId: string | number = 0;
           if (useFieldLanes) {
             const raw = getLaneKeyValue(ev, threadLaneFieldPath);
@@ -523,22 +530,25 @@ export function useChartRenderer({
           const bucket = byLevel.get(laneId);
           if (bucket) bucket.push(ev);
           else byLevel.set(laneId, [ev]);
-        });
+        }
         const laneIds = Array.from(byLevel.keys()).sort((a, b) => {
           const na = Number(a);
           const nb = Number(b);
           if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
           return String(a).localeCompare(String(b), undefined, { numeric: true });
         });
-        return laneIds.map((laneId) => {
+        const result: Array<{ laneId: string | number; events: any[] }> = [];
+        for (let li = 0; li < laneIds.length; li++) {
+          const laneId = laneIds[li];
           const bucket = [...(byLevel.get(laneId) ?? [])];
           bucket.sort((a, b) => {
             const byStart = Number(a?.start ?? 0) - Number(b?.start ?? 0);
             if (byStart !== 0) return byStart;
             return Number(a?.end ?? 0) - Number(b?.end ?? 0);
           });
-          return { laneId, events: bucket };
-        });
+          result.push({ laneId, events: bucket });
+        }
+        return result;
       };
 
       type HierarchyNode = {
@@ -550,6 +560,11 @@ export function useChartRenderer({
         levelMap?: ThreadLevelMap;
       };
 
+      /** Max thread paths per process to avoid stack overflow; raise if you need more. */
+      const MAX_TID_PATHS_PER_HIERARCHY = 2000;
+      /** Max tree nodes to process per process; raise if hierarchy is very deep. */
+      const MAX_NODES_PER_HIERARCHY = 10000;
+
       const buildLanesForHierarchy1 = (hierarchy1Id: string) => {
         const threadMap = threadsByHierarchy1.get(hierarchy1Id);
         if (!threadMap) return [];
@@ -560,17 +575,24 @@ export function useChartRenderer({
           children: new Map<string, HierarchyNode>(),
           events: []
         };
-        const tidPaths = Array.from(threadMap.keys()).sort((a, b) =>
+        const allTidPaths = Array.from(threadMap.keys()).sort((a, b) =>
           String(a).localeCompare(String(b), undefined, { numeric: true })
         );
-        tidPaths.forEach((tidPath) => {
+        const tidPaths =
+          allTidPaths.length <= MAX_TID_PATHS_PER_HIERARCHY
+            ? allTidPaths
+            : allTidPaths.slice(0, MAX_TID_PATHS_PER_HIERARCHY);
+        const omittedCount = allTidPaths.length - tidPaths.length;
+
+        for (let ti = 0; ti < tidPaths.length; ti++) {
+          const tidPath = tidPaths[ti];
           const levelMap = threadMap.get(tidPath);
           const pathEvents: any[] = [];
           if (levelMap) {
-            levelMap.forEach((arr: any[]) => {
-              if (!Array.isArray(arr) || arr.length === 0) return;
+            for (const arr of levelMap.values()) {
+              if (!Array.isArray(arr) || arr.length === 0) continue;
               for (const item of arr) pathEvents.push(item);
-            });
+            }
           }
           const segments = String(tidPath)
             .split('|')
@@ -578,7 +600,8 @@ export function useChartRenderer({
             .filter(Boolean);
           let current = root;
           if (pathEvents.length > 0) current.events.push(...pathEvents);
-          segments.forEach((segment, idx) => {
+          for (let idx = 0; idx < segments.length; idx++) {
+            const segment = segments[idx];
             const nextPath = [...current.fullPath, segment];
             const nextKey = nextPath.join('|');
             let node = current.children.get(segment);
@@ -597,8 +620,8 @@ export function useChartRenderer({
               node.levelMap = levelMap;
             }
             current = node;
-          });
-        });
+          }
+        }
 
         const lanes: any[] = [];
         const emitNodePackedLanes = (
@@ -608,7 +631,9 @@ export function useChartRenderer({
         ) => {
           const hierarchy2Val = pathSegments.join('|');
           const packed = buildRuleLanes(sourceEvents);
-          packed.slice(Math.max(0, startFrom)).forEach(({ laneId, events }) => {
+          const slice = packed.slice(Math.max(0, startFrom));
+          for (let i = 0; i < slice.length; i++) {
+            const { laneId, events } = slice[i];
             const laneKey = buildHierarchyLaneKey(
               [hierarchy1Id, ...pathSegments],
               `__group_lane__${String(laneId)}`
@@ -624,7 +649,7 @@ export function useChartRenderer({
               threadLabel: '',
               events
             });
-          });
+          }
         };
         const emitLeafLanes = (
           pathSegments: string[],
@@ -633,15 +658,15 @@ export function useChartRenderer({
         ) => {
           if (!levelMap) return;
           const hierarchy2Path = pathSegments.join('|');
-          const isMainThread = hierarchy2Path === String(hierarchy1Id);
           if (threadOrderMode === 'auto') {
             const allEvents: any[] = [];
-            levelMap.forEach((arr: any[]) => {
-              if (!Array.isArray(arr) || arr.length === 0) return;
+            for (const arr of levelMap.values()) {
+              if (!Array.isArray(arr) || arr.length === 0) continue;
               for (const item of arr) allEvents.push(item);
-            });
+            }
             const autoLanes = buildAutoLanes(allEvents);
-            autoLanes.forEach((events: any[], idx: number) => {
+            for (let idx = 0; idx < autoLanes.length; idx++) {
+              const events = autoLanes[idx];
               const laneKey = buildHierarchyLaneKey([hierarchy1Id, ...pathSegments], idx);
               lanes.push({
                 type: 'lane',
@@ -654,7 +679,7 @@ export function useChartRenderer({
                 threadLabel: idx === 0 ? (rowLabel ?? '') : '',
                 events
               });
-            });
+            }
             return;
           }
           const levels = Array.from(levelMap.keys()).sort((a, b) => {
@@ -663,7 +688,8 @@ export function useChartRenderer({
             if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
             return String(a).localeCompare(String(b), undefined, { numeric: true });
           });
-          levels.forEach((level, idx) => {
+          for (let idx = 0; idx < levels.length; idx++) {
+            const level = levels[idx];
             const events = levelMap.get(level) ?? levelMap.get(String(level)) ?? [];
             const laneKey = buildHierarchyLaneKey([hierarchy1Id, ...pathSegments], level);
             lanes.push({
@@ -677,9 +703,9 @@ export function useChartRenderer({
               threadLabel: idx === 0 ? (rowLabel ?? '') : '',
               events
             });
-          });
+          }
         };
-        const emitNode = (node: HierarchyNode) => {
+        const processNode = (node: HierarchyNode): HierarchyNode[] => {
           const path = node.fullPath;
           const depth = path.length;
           const expandKey = [hierarchy1Id, ...path].join('|');
@@ -721,23 +747,43 @@ export function useChartRenderer({
           if (hasChildren && !expanded && packedNodeLanes.length > 1) {
             emitNodePackedLanes(path, node.events, 1);
           }
-          if (hasChildren && expanded) {
-            const children = Array.from(node.children.values()).sort((a, b) =>
-              String(a.segment).localeCompare(String(b.segment), undefined, { numeric: true })
-            );
-            children.forEach((child) => emitNode(child));
-          }
           if (showLeafLanes) {
             const rowLabel = isLeafOnly
               ? getHierarchyNodeLabel(hierarchy1Id, path, path.join('|') === String(hierarchy1Id))
               : undefined;
             emitLeafLanes(path, node.levelMap, rowLabel);
           }
+          if (hasChildren && expanded) {
+            return Array.from(node.children.values()).sort((a, b) =>
+              String(a.segment).localeCompare(String(b.segment), undefined, { numeric: true })
+            );
+          }
+          return [];
         };
         const roots = Array.from(root.children.values()).sort((a, b) =>
           String(a.segment).localeCompare(String(b.segment), undefined, { numeric: true })
         );
-        roots.forEach((node) => emitNode(node));
+        const stack = [...roots].reverse();
+        let nodesProcessed = 0;
+        while (stack.length > 0 && nodesProcessed < MAX_NODES_PER_HIERARCHY) {
+          const node = stack.pop()!;
+          nodesProcessed += 1;
+          const next = processNode(node);
+          for (let i = next.length - 1; i >= 0; i--) stack.push(next[i]);
+        }
+        if (omittedCount > 0) {
+          lanes.push({
+            type: 'lane',
+            hierarchy1: hierarchy1Id,
+            hierarchy2: '',
+            hierarchyPath: [],
+            hierarchyValues: [String(hierarchy1Id)],
+            level: '__more__',
+            laneKey: `${hierarchy1Id}|__more__`,
+            threadLabel: `… and ${omittedCount} more threads (first ${MAX_TID_PATHS_PER_HIERARCHY} shown; narrow time range to see all)`,
+            events: []
+          });
+        }
         return lanes;
       };
 
@@ -758,7 +804,8 @@ export function useChartRenderer({
       const blocks: Block[] = [];
       let yCursor = margin.top;
 
-      orderedHierarchy1Ids.forEach((hierarchy1Id) => {
+      for (let hi = 0; hi < orderedHierarchy1Ids.length; hi++) {
+        const hierarchy1Id = orderedHierarchy1Ids[hi];
         const depth = depthByHierarchy1.get(String(hierarchy1Id)) || 0;
         const expanded = expandedHierarchy1Ids.includes(hierarchy1Id);
         if (!expanded) {
@@ -776,10 +823,34 @@ export function useChartRenderer({
             lanes: []
           });
           yCursor += headerHeight;
-          return;
+          continue;
         }
 
-        const lanes = buildLanesForHierarchy1(hierarchy1Id);
+        let lanes: any[];
+        try {
+          lanes = buildLanesForHierarchy1(hierarchy1Id);
+        } catch (err: any) {
+          const isStackOverflow =
+            err instanceof RangeError ||
+            (err?.message && String(err.message).toLowerCase().includes('stack'));
+          if (isStackOverflow) {
+            lanes = [
+              {
+                type: 'lane' as const,
+                events: [],
+                hierarchy1: hierarchy1Id,
+                hierarchy2: '',
+                hierarchyPath: [] as string[],
+                hierarchyValues: [String(hierarchy1Id)],
+                level: 0,
+                laneKey: `${hierarchy1Id}|__overflow__`,
+                threadLabel: 'Too many threads; try narrowing the time range or refresh.'
+              }
+            ];
+          } else {
+            throw err;
+          }
+        }
         const lanesHeight = lanes.reduce((sum: number, lane: any) => sum + laneHeight, 0);
         const blockHeight = headerHeight + expandedPadding + lanesHeight + expandedPadding;
 
@@ -806,7 +877,7 @@ export function useChartRenderer({
 
         blocks.push(block);
         yCursor = block.y1;
-      });
+      }
 
       // Fork groups: parent + children as table-like segments (no indent; background + header style)
       const forkRelations = forkRelationsRef.current;
