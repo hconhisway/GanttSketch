@@ -59,14 +59,16 @@ const getLaneKeyValue = (ev: any, path: string) => {
 
 const buildAutoLanes = (events: NormalizedEvent[]) => {
   if (!Array.isArray(events) || events.length === 0) return [];
-  const sorted = [...events].sort((a, b) => {
+  // Sort in-place to avoid extra array allocations in the worker hot path.
+  events.sort((a, b) => {
     const byStart = (a.start ?? 0) - (b.start ?? 0);
     if (byStart !== 0) return byStart;
     return (a.end ?? 0) - (b.end ?? 0);
   });
   const lanes: NormalizedEvent[][] = [];
   const laneEnds: number[] = [];
-  sorted.forEach((ev) => {
+  for (let si = 0; si < events.length; si += 1) {
+    const ev = events[si];
     let placedIndex = -1;
     for (let i = 0; i < laneEnds.length; i += 1) {
       if ((ev.start ?? 0) >= laneEnds[i]) {
@@ -81,7 +83,7 @@ const buildAutoLanes = (events: NormalizedEvent[]) => {
       laneEnds[placedIndex] = Math.max(laneEnds[placedIndex], ev.end ?? 0);
       lanes[placedIndex].push(ev);
     }
-  });
+  }
   return lanes;
 };
 
@@ -92,8 +94,13 @@ const filterByViewport = (
 ) => {
   if (!Array.isArray(events) || events.length === 0) return [];
   const [t0, t1] = timeDomain;
-  const laneSet = new Set((visibleLaneIds || []).map((lane) => String(lane)));
-  const hasLaneFilter = ENABLE_VIEWPORT_LANE_FILTER && laneSet.size > 0;
+  const hasLaneFilter =
+    ENABLE_VIEWPORT_LANE_FILTER &&
+    Array.isArray(visibleLaneIds) &&
+    visibleLaneIds.length > 0;
+  const laneSet = hasLaneFilter
+    ? new Set((visibleLaneIds || []).map((lane) => String(lane)))
+    : null;
   return events.filter((ev) => {
     if (hasLaneFilter) {
       const hierarchyValues = Array.isArray((ev as any)?.hierarchyValues)
@@ -103,9 +110,9 @@ const filterByViewport = (
       const hierarchyPath = hierarchyValues.slice(1).join('|');
       const track = String((ev as any)?.track ?? '');
       if (
-        !laneSet.has(hierarchy1) &&
-        !laneSet.has(hierarchyPath) &&
-        (track ? !laneSet.has(track) : true)
+        !laneSet!.has(hierarchy1) &&
+        !laneSet!.has(hierarchyPath) &&
+        (track ? !laneSet!.has(track) : true)
       ) {
         return false;
       }
@@ -159,8 +166,10 @@ ctx.onmessage = (event: MessageEvent<WorkerRequest>) => {
         lanes.forEach((laneEvents, idx) => {
           const pathValues = [hierarchy1, ...String(hierarchyPath).split('|').filter(Boolean)];
           const laneKey = buildHierarchyLaneKey(pathValues, idx);
-          const withLaneKey = laneEvents.map((ev) => ({ ...ev, laneKey }));
-          laneBuckets.set(laneKey, withLaneKey);
+          for (let i = 0; i < laneEvents.length; i += 1) {
+            (laneEvents[i] as any).laneKey = laneKey;
+          }
+          laneBuckets.set(laneKey, laneEvents);
         });
       });
     });
@@ -178,7 +187,8 @@ ctx.onmessage = (event: MessageEvent<WorkerRequest>) => {
       }
       const laneKey = buildHierarchyLaneKey(hierarchyValues, laneValue ?? 0);
       const bucket = laneBuckets.get(laneKey) || [];
-      bucket.push({ ...ev, laneKey });
+      (ev as any).laneKey = laneKey;
+      bucket.push(ev);
       laneBuckets.set(laneKey, bucket);
     });
   }
@@ -191,6 +201,7 @@ ctx.onmessage = (event: MessageEvent<WorkerRequest>) => {
       timeDomain: view.timeDomain,
       viewportPxWidth: view.viewportPxWidth,
       pixelWindow: view.pixelWindow,
+      eventsSortedByStart: true,
       colorKeyForEvent: (ev) => {
         const hierarchyValues = Array.isArray((ev as any)?.hierarchyValues)
           ? (ev as any).hierarchyValues
@@ -209,7 +220,8 @@ ctx.onmessage = (event: MessageEvent<WorkerRequest>) => {
         return resolveColorKey(ev, trackKey, trackMeta, colorConfig, legacyColorConfig);
       }
     });
-    primitives.push(...lanePrimitives);
+    // Avoid `arr.push(...bigArray)` which can throw RangeError (stack/arguments limit).
+    for (let i = 0; i < lanePrimitives.length; i += 1) primitives.push(lanePrimitives[i]);
   });
 
   const soaBundle = buildSoAChunksFromPrimitives(primitives);

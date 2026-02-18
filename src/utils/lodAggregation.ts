@@ -10,6 +10,11 @@ interface LODOptions {
   viewportPxWidth: number;
   pixelWindow: number;
   colorKeyForEvent?: (event: NormalizedEvent) => string;
+  /**
+   * When true, `events` are assumed sorted ascending by `start`.
+   * Enables safe early-exit when `start > t1`.
+   */
+  eventsSortedByStart?: boolean;
 }
 
 const defaultColorKeyForEvent = (event: NormalizedEvent, laneId: string): string =>
@@ -24,7 +29,14 @@ const defaultColorKeyForEvent = (event: NormalizedEvent, laneId: string): string
 
 export function aggregateLaneEvents(
   events: NormalizedEvent[],
-  { laneId, timeDomain, viewportPxWidth, pixelWindow, colorKeyForEvent }: LODOptions
+  {
+    laneId,
+    timeDomain,
+    viewportPxWidth,
+    pixelWindow,
+    colorKeyForEvent,
+    eventsSortedByStart
+  }: LODOptions
 ): RenderPrimitive[] {
   if (!Array.isArray(events) || events.length === 0) return [];
   const [t0, t1] = timeDomain;
@@ -38,10 +50,12 @@ export function aggregateLaneEvents(
   }
 
   const buckets = new Map<number, { items: NormalizedEvent[]; minStart: number; maxEnd: number }>();
-  events.forEach((ev) => {
+  for (let i = 0; i < events.length; i += 1) {
+    const ev = events[i];
     const start = Number(ev.start ?? 0);
+    if (eventsSortedByStart && start > t1) break;
     const end = Number(ev.end ?? 0);
-    if (end < t0 || start > t1) return;
+    if (end < t0 || start > t1) continue;
     const idx = Math.floor((start - t0) / windowTime);
     const bucket = buckets.get(idx) || {
       items: [],
@@ -52,7 +66,7 @@ export function aggregateLaneEvents(
     bucket.minStart = Math.min(bucket.minStart, start);
     bucket.maxEnd = Math.max(bucket.maxEnd, end);
     buckets.set(idx, bucket);
-  });
+  }
 
   const primitives: RenderPrimitive[] = [];
   const orderedKeys = Array.from(buckets.keys()).sort((a, b) => a - b);

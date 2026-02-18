@@ -584,6 +584,11 @@ export function useChartRenderer({
             : allTidPaths.slice(0, MAX_TID_PATHS_PER_HIERARCHY);
         const omittedCount = allTidPaths.length - tidPaths.length;
 
+        // Avoid `arr.push(...bigArray)` which can throw RangeError (stack/arguments limit).
+        const appendEvents = (dst: any[], src: any[]) => {
+          for (let i = 0; i < src.length; i += 1) dst.push(src[i]);
+        };
+
         for (let ti = 0; ti < tidPaths.length; ti++) {
           const tidPath = tidPaths[ti];
           const levelMap = threadMap.get(tidPath);
@@ -599,7 +604,7 @@ export function useChartRenderer({
             .map((v) => v.trim())
             .filter(Boolean);
           let current = root;
-          if (pathEvents.length > 0) current.events.push(...pathEvents);
+          if (pathEvents.length > 0) appendEvents(current.events, pathEvents);
           for (let idx = 0; idx < segments.length; idx++) {
             const segment = segments[idx];
             const nextPath = [...current.fullPath, segment];
@@ -615,7 +620,7 @@ export function useChartRenderer({
               };
               current.children.set(segment, node);
             }
-            if (pathEvents.length > 0) node.events.push(...pathEvents);
+            if (pathEvents.length > 0) appendEvents(node.events, pathEvents);
             if (idx === segments.length - 1) {
               node.levelMap = levelMap;
             }
@@ -907,14 +912,40 @@ export function useChartRenderer({
         (g) => g.endBlockIndex > g.startBlockIndex
       );
 
+      // Fast lookup for "which fork group contains block i" (matches forkGroups.find semantics).
+      const forkGroupByBlockIndex: Array<ForkGroup | undefined> = hasForkStructure
+        ? new Array(blocks.length)
+        : [];
+      if (hasForkStructure) {
+        let groupPtr = 0;
+        const active: ForkGroup[] = [];
+        let head = 0;
+        for (let i = 0; i < blocks.length; i += 1) {
+          while (groupPtr < forkGroups.length && forkGroups[groupPtr].startBlockIndex <= i) {
+            active.push(forkGroups[groupPtr]);
+            groupPtr += 1;
+          }
+          while (head < active.length && active[head].endBlockIndex < i) {
+            head += 1;
+          }
+          forkGroupByBlockIndex[i] = head < active.length ? active[head] : undefined;
+        }
+      }
+
       const GAP_BETWEEN_FORK_GROUPS = 12;
       const FORK_CARD_RADIUS = 8;
       const FORK_CARD_STROKE = 'rgba(0,0,0,0.08)';
       if (hasForkStructure && forkGroups.length > 0) {
-        const gapBeforeBlock = (blockIndex: number) =>
-          GAP_BETWEEN_FORK_GROUPS * forkGroups.filter((g) => g.endBlockIndex < blockIndex).length;
+        // Avoid O(N^2) filtering: precompute cumulative fork-group ends.
+        const forkEnds = forkGroups
+          .map((g) => g.endBlockIndex)
+          .sort((a, b) => a - b);
+        let endedBeforeCount = 0;
         blocks.forEach((block, i) => {
-          const offset = gapBeforeBlock(i);
+          while (endedBeforeCount < forkEnds.length && forkEnds[endedBeforeCount] < i) {
+            endedBeforeCount += 1;
+          }
+          const offset = GAP_BETWEEN_FORK_GROUPS * endedBeforeCount;
           if (offset <= 0) return;
           block.y0 += offset;
           block.y1 += offset;
@@ -931,6 +962,32 @@ export function useChartRenderer({
       }
 
       const stageHeight = yCursor + margin.bottom;
+
+      // Precompute lane rows/order once per layout build (avoid O(N) allocations per redraw).
+      const laneRows: Array<{ laneId: string; y0: number; y1: number }> = [];
+      for (let i = 0; i < blocks.length; i += 1) {
+        const block = blocks[i];
+        laneRows.push({
+          laneId: String(block.hierarchy1),
+          y0: block.headerY0,
+          y1: block.headerY1
+        });
+        if (block.expanded && Array.isArray(block.lanes)) {
+          for (let li = 0; li < block.lanes.length; li += 1) {
+            const lane: any = block.lanes[li];
+            const hierarchyValues = Array.isArray(lane?.hierarchyValues)
+              ? lane.hierarchyValues.map((value: any) => String(value ?? ''))
+              : [];
+            const laneId =
+              hierarchyValues.length > 0
+                ? hierarchyValues.join('|')
+                : String(lane?.hierarchy2 ?? lane?.hierarchy1 ?? block.hierarchy1 ?? '');
+            laneRows.push({ laneId, y0: lane.y0, y1: lane.y1 });
+          }
+        }
+      }
+      const laneOrder = laneRows.map((row) => row.laneId);
+      updateViewStateFromRender({ laneOrder });
 
       let containerWidth = container.clientWidth || 900;
       let innerWidth = Math.max(containerWidth - margin.left - margin.right, 320);
@@ -1391,6 +1448,7 @@ export function useChartRenderer({
           timeDomain: [p.vs, p.ve],
           viewportPxWidth,
           pixelWindow,
+          eventsSortedByStart: true,
           colorKeyForEvent
         });
         lane.renderEvents = primitives;
@@ -1473,27 +1531,6 @@ export function useChartRenderer({
         const bufferedStart = Math.max(0, startIdx - BUFFER_BLOCKS);
         const bufferedEnd = Math.min(blocks.length - 1, endIdx + BUFFER_BLOCKS);
 
-        const laneRows = blocks.flatMap((block) => {
-          const rows: Array<{ laneId: string; y0: number; y1: number }> = [
-            { laneId: String(block.hierarchy1), y0: block.headerY0, y1: block.headerY1 }
-          ];
-          if (block.expanded && Array.isArray(block.lanes)) {
-            block.lanes.forEach((lane: any) => {
-              const hierarchyValues = Array.isArray(lane?.hierarchyValues)
-                ? lane.hierarchyValues.map((value: any) => String(value ?? ''))
-                : [];
-              const laneId =
-                hierarchyValues.length > 0
-                  ? hierarchyValues.join('|')
-                  : String(lane?.hierarchy2 ?? lane?.hierarchy1 ?? block.hierarchy1 ?? '');
-              rows.push({ laneId, y0: lane.y0, y1: lane.y1 });
-            });
-          }
-          return rows;
-        });
-
-        const laneOrder = laneRows.map((row) => row.laneId);
-
         let laneStartIdx = 0;
         let laneEndIdx = Math.max(0, laneRows.length - 1);
         let loLane = 0;
@@ -1527,7 +1564,6 @@ export function useChartRenderer({
         updateViewStateFromRender({
           visibleLaneRange: [laneStartIdx, laneEndIdx],
           visibleLaneIds: visibleLaneIdsSorted,
-          laneOrder,
           scrollTop: yMin
         });
 
@@ -1558,10 +1594,9 @@ export function useChartRenderer({
 
         const activeRenderer = webglRenderer || null;
         const webglEnabled = ganttConfig?.performance?.webglEnabled !== false;
-        const laneKeySet = new Set(lanePositions.keys());
         const hasSoAKeyOverlap = Boolean(
           renderSoA?.chunks?.some((chunk) =>
-            chunk.bundle.meta.laneKeys.some((key) => laneKeySet.has(String(key)))
+            chunk.bundle.meta.laneKeys.some((key) => lanePositions.has(String(key)))
           )
         );
         const useWebGL = Boolean(activeRenderer && renderSoA && webglEnabled && hasSoAKeyOverlap);
@@ -1683,9 +1718,7 @@ export function useChartRenderer({
           if (block.y0 > yMax) break;
 
           const forkGroup = hasForkStructure
-            ? forkGroups.find(
-                (g) => g.startBlockIndex <= i && i <= g.endBlockIndex
-              )
+            ? forkGroupByBlockIndex[i]
             : undefined;
           const isForkGroupHeader = forkGroup?.parentBlockIndex === i;
           const headerFill =
@@ -1836,7 +1869,7 @@ export function useChartRenderer({
                 const x2Raw = xOf(tEnd, p);
                 if (x2Raw < boxX1 || x1Raw > boxX1 + boxW) return;
                 // Skip sub-pixel bars to avoid phantom strips at axis boundaries
-                if (x2Raw - x1Raw < 0.5) return;
+                // if (x2Raw - x1Raw < 0.1) return;
 
                 // Snap to integer pixels with consistent rounding
                 const x1 = Math.floor(x1Raw);
@@ -2167,9 +2200,7 @@ export function useChartRenderer({
           if (block.y0 > yMax) break;
 
           const forkGroupY = hasForkStructure
-            ? forkGroups.find(
-                (g) => g.startBlockIndex <= i && i <= g.endBlockIndex
-              )
+            ? forkGroupByBlockIndex[i]
             : undefined;
           const blockFill =
             forkGroupY != null
@@ -2382,6 +2413,32 @@ export function useChartRenderer({
         });
       };
 
+      // Scroll-only redraw: bars + y-labels depend on scroll; topbar/deps do not.
+      const redrawForScroll = () => {
+        const renderStart = performance.now();
+        updateVisibleWindow();
+        drawBars();
+        renderYLabels();
+        const renderMs = performance.now() - renderStart;
+        const interactionAt = Number(viewStateRef.current?.lastInteractionAt || 0);
+        const interactionMs =
+          interactionAt > 0 ? Math.max(0, Date.now() - interactionAt) : undefined;
+        perfMetrics.record({
+          timestamp: Date.now(),
+          renderMs,
+          gpuUploadMs: lastGpuUploadMs ?? undefined,
+          interactionMs,
+          rendererMode: lastRendererMode,
+          webglInstanceCount: lastWebglInstanceCount ?? undefined
+        });
+      };
+
+      // Lightweight redraw used for hover-only updates (avoid relayout/axis work on mousemove).
+      const redrawBarsOnly = () => {
+        updateVisibleWindow();
+        drawBars();
+      };
+
       // Expose redraw for viewRange updates (zoom/pan)
       redrawRef.current = redraw;
       onResize = resizeScene;
@@ -2461,6 +2518,7 @@ export function useChartRenderer({
 
       let hoverFrame = 0;
       let lastHover: { clientX: number; clientY: number } | null = null;
+      let lastTooltipItem: any = null;
       const handleMouseMove = (e: MouseEvent) => {
         lastHover = { clientX: e.clientX, clientY: e.clientY };
         if (hoverFrame) return;
@@ -2471,71 +2529,85 @@ export function useChartRenderer({
           const x = lastHover.clientX - rect.left + container.scrollLeft;
           const y = lastHover.clientY - rect.top + container.scrollTop;
           const hit = findItemAtPosition(x, y);
-          visibleState.hoveredTrack = hit ? `proc-${hit.block.hierarchy1}` : null;
-          visibleState.hoveredItem = hit ? hit.item : null;
-          redraw();
+          const nextHoveredTrack = hit ? `proc-${hit.block.hierarchy1}` : null;
+          const nextHoveredItem = hit ? hit.item : null;
+          const hoverChanged =
+            nextHoveredTrack !== visibleState.hoveredTrack ||
+            nextHoveredItem !== visibleState.hoveredItem;
+          visibleState.hoveredTrack = nextHoveredTrack;
+          visibleState.hoveredItem = nextHoveredItem;
+          if (hoverChanged) {
+            redrawBarsOnly();
+          }
 
           if (hit && hit.item) {
             const tooltipConfig = ganttConfig?.tooltip || GANTT_CONFIG.tooltip;
             if (tooltipConfig?.enabled === false) {
               tooltip.style.display = 'none';
+              lastTooltipItem = null;
               return;
             }
             tooltip.style.display = 'block';
             tooltip.style.left = `${lastHover.clientX + 12}px`;
             tooltip.style.top = `${lastHover.clientY + 12}px`;
             const item = hit.item;
-            if (item?.kind === 'summary') {
-              tooltip.innerHTML = buildSummaryTooltipHtml(item);
-              return;
-            }
-            const resolvedHierarchyValues =
-              Array.isArray(item?.hierarchyValues) && item.hierarchyValues.length > 0
-                ? item.hierarchyValues.map((value: any) => String(value ?? ''))
-                : [
-                    String(item?.hierarchy1 ?? hit.block.hierarchy1 ?? 'unknown'),
-                    ...(
-                      Array.isArray(hit.lane?.hierarchyPath)
-                        ? hit.lane.hierarchyPath
-                        : String(item?.hierarchy2 ?? hit.lane?.hierarchy2 ?? '').split('|')
-                    )
-                      .map((value: any) => String(value ?? '').trim())
-                      .filter(Boolean)
-                  ];
-            const hierarchy1 = resolvedHierarchyValues[0] ?? 'unknown';
-            const hierarchy2 = resolvedHierarchyValues.slice(1).join('|') || hierarchy1;
-            const startUs = Number(item.start ?? item.timeStart);
-            const endUs = Number(item.end ?? item.timeEnd);
-            const durationUs =
-              Number.isFinite(startUs) && Number.isFinite(endUs) ? Math.max(0, endUs - startUs) : 0;
-            const sqlId = item.id ?? null;
+            if (item !== lastTooltipItem) {
+              lastTooltipItem = item;
+              if (item?.kind === 'summary') {
+                tooltip.innerHTML = buildSummaryTooltipHtml(item);
+                return;
+              }
+              const resolvedHierarchyValues =
+                Array.isArray(item?.hierarchyValues) && item.hierarchyValues.length > 0
+                  ? item.hierarchyValues.map((value: any) => String(value ?? ''))
+                  : [
+                      String(item?.hierarchy1 ?? hit.block.hierarchy1 ?? 'unknown'),
+                      ...(
+                        Array.isArray(hit.lane?.hierarchyPath)
+                          ? hit.lane.hierarchyPath
+                          : String(item?.hierarchy2 ?? hit.lane?.hierarchy2 ?? '').split('|')
+                      )
+                        .map((value: any) => String(value ?? '').trim())
+                        .filter(Boolean)
+                    ];
+              const hierarchy1 = resolvedHierarchyValues[0] ?? 'unknown';
+              const hierarchy2 = resolvedHierarchyValues.slice(1).join('|') || hierarchy1;
+              const startUs = Number(item.start ?? item.timeStart);
+              const endUs = Number(item.end ?? item.timeEnd);
+              const durationUs =
+                Number.isFinite(startUs) && Number.isFinite(endUs)
+                  ? Math.max(0, endUs - startUs)
+                  : 0;
+              const sqlId = item.id ?? null;
 
-            const stats = processStats.get(String(hierarchy1)) || {};
-            const tooltipHtml = buildTooltipHtml(hit, tooltipConfig, {
-              event: item,
-              block: hit.block,
-              lane: hit.lane,
-              hierarchy1,
-              hierarchy2: String(hierarchy2 ?? ''),
-              hierarchyValues: resolvedHierarchyValues,
-              startUs,
-              endUs,
-              durationUs,
-              sqlId,
-              stats,
-              vars: {
+              const stats = processStats.get(String(hierarchy1)) || {};
+              const tooltipHtml = buildTooltipHtml(hit, tooltipConfig, {
+                event: item,
+                block: hit.block,
+                lane: hit.lane,
                 hierarchy1,
-                hierarchy2,
+                hierarchy2: String(hierarchy2 ?? ''),
                 hierarchyValues: resolvedHierarchyValues,
-                ...buildHierarchyVars(resolvedHierarchyValues),
                 startUs,
                 endUs,
                 durationUs,
-                sqlId
-              }
-            });
-            tooltip.innerHTML = tooltipHtml;
+                sqlId,
+                stats,
+                vars: {
+                  hierarchy1,
+                  hierarchy2,
+                  hierarchyValues: resolvedHierarchyValues,
+                  ...buildHierarchyVars(resolvedHierarchyValues),
+                  startUs,
+                  endUs,
+                  durationUs,
+                  sqlId
+                }
+              });
+              tooltip.innerHTML = tooltipHtml;
+            }
           } else {
+            lastTooltipItem = null;
             tooltip.style.display = 'none';
           }
         });
@@ -2549,8 +2621,9 @@ export function useChartRenderer({
         }
         visibleState.hoveredTrack = null;
         visibleState.hoveredItem = null;
+        lastTooltipItem = null;
         tooltip.style.display = 'none';
-        redraw();
+        redrawBarsOnly();
       };
 
       let viewRangeSyncTimer: number | null = null;
@@ -2620,10 +2693,16 @@ export function useChartRenderer({
           }
           if (hit?.item && hit.item.kind !== 'summary') {
             const nextId = hit.item.id ?? null;
+            const nextSelection = nextId == null ? null : String(nextId);
+            const prevSnap = viewStateRef.current;
+            if (prevSnap) {
+              viewStateRef.current = { ...prevSnap, selection: nextSelection };
+            }
             setViewState((prev) => ({
               ...prev,
-              selection: nextId == null ? null : String(nextId)
+              selection: nextSelection
             }));
+            renderDependencies();
           }
           return;
         }
@@ -2891,7 +2970,7 @@ export function useChartRenderer({
         if (scrollRaf) return;
         scrollRaf = requestAnimationFrame(() => {
           scrollRaf = 0;
-          redraw();
+          redrawForScroll();
         });
       };
       container.addEventListener('scroll', handleScroll);

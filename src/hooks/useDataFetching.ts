@@ -272,15 +272,16 @@ export function useDataFetching({
         };
         return resolveColorKey(ev, trackKey, trackMeta, colorConfig, legacyColorConfig);
       };
-      primitives.push(
-        ...aggregateLaneEvents(laneEvents, {
-          laneId,
-          timeDomain: [viewStart, viewEnd],
-          viewportPxWidth,
-          pixelWindow,
-          colorKeyForEvent
-        })
-      );
+      const lanePrimitives = aggregateLaneEvents(laneEvents, {
+        laneId,
+        timeDomain: [viewStart, viewEnd],
+        viewportPxWidth,
+        pixelWindow,
+        eventsSortedByStart: true,
+        colorKeyForEvent
+      });
+      // Avoid `arr.push(...bigArray)` which can throw RangeError (stack/arguments limit).
+      for (let i = 0; i < lanePrimitives.length; i += 1) primitives.push(lanePrimitives[i]);
     });
     return buildSoAChunksFromPrimitives(primitives);
   }, [getLaneKeyValue, viewStateRef]);
@@ -838,30 +839,33 @@ export function useDataFetching({
             fullDataRef.current = rawEvents;
           }
 
-          // Debug: inspect shape of data received by frontend
-          const events = rawData?.events;
-          const eventCount = Array.isArray(events) ? events.length : 0;
-          const sample = eventCount > 0 ? events[0] : null;
-          const sampleStr = sample ? JSON.stringify(sample, null, 2) : '';
-          const sampleSize = sampleStr.length;
-          console.group('[Frontend] Raw data received');
-          console.log('Top-level keys:', rawData ? Object.keys(rawData) : []);
-          console.log('events count:', eventCount);
-          if (rawData?.metadata) console.log('metadata:', rawData.metadata);
-          if (sample) {
-            console.log('First event keys:', Object.keys(sample));
-            console.log(
-              'First event (sample) size:',
-              sampleSize,
-              'chars (~' + Math.ceil(sampleSize / 4) + ' tokens)'
-            );
-            console.log(
-              'First event sample:',
-              sampleStr.slice(0, 2000) +
-                (sampleStr.length > 2000 ? '\n... (truncated)' : '')
-            );
+          const debugLogs = ganttConfigRef.current?.performance?.debugLogs === true;
+          if (debugLogs) {
+            // Debug: inspect shape of data received by frontend
+            const events = rawData?.events;
+            const eventCount = Array.isArray(events) ? events.length : 0;
+            const sample = eventCount > 0 ? events[0] : null;
+            const sampleStr = sample ? JSON.stringify(sample, null, 2) : '';
+            const sampleSize = sampleStr.length;
+            console.group('[Frontend] Raw data received');
+            console.log('Top-level keys:', rawData ? Object.keys(rawData) : []);
+            console.log('events count:', eventCount);
+            if (rawData?.metadata) console.log('metadata:', rawData.metadata);
+            if (sample) {
+              console.log('First event keys:', Object.keys(sample));
+              console.log(
+                'First event (sample) size:',
+                sampleSize,
+                'chars (~' + Math.ceil(sampleSize / 4) + ' tokens)'
+              );
+              console.log(
+                'First event sample:',
+                sampleStr.slice(0, 2000) +
+                  (sampleStr.length > 2000 ? '\n... (truncated)' : '')
+              );
+            }
+            console.groupEnd();
           }
-          console.groupEnd();
 
           // Process data via agent mapping only (no transformData fallback)
           let transformed: any[] = [];
