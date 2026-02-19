@@ -14,8 +14,8 @@ const PROVIDERS = [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'ollama', label: 'Ollama' },
   { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'zhipu', label: '智谱 (Zhipu)' },
-  { value: 'qwen', label: '通义千问 (Qwen)' },
+  { value: 'zhipu', label: 'Zhipu' },
+  { value: 'qwen', label: 'Qwen' },
   { value: 'custom', label: 'Custom' }
 ] as const;
 

@@ -55,6 +55,7 @@ interface UseDataFetchingArgs {
   viewStateRef: React.MutableRefObject<ViewState>;
   apiUrl: string;
   traceUrl: string;
+  sessionId?: string;
   defaultEndUs: number;
   setIsFetching: (value: boolean) => void;
   setData: (next: any[]) => void;
@@ -93,6 +94,7 @@ export function useDataFetching({
   viewStateRef,
   apiUrl,
   traceUrl,
+  sessionId,
   defaultEndUs,
   setIsFetching,
   setData,
@@ -440,6 +442,7 @@ export function useDataFetching({
           bins,
           filters,
           signal: controller.signal,
+          sessionId,
           fullData: fullDataRef.current || undefined
         });
         const fetchMs = performance.now() - fetchStartMs;
@@ -615,7 +618,8 @@ export function useDataFetching({
         setIsFetching(false);
       } catch (err: any) {
         if (requestSeqRef.current !== requestId || controller.signal.aborted) return;
-        setError(err);
+        const msg = err?.message ? String(err.message) : String(err);
+        setError(msg);
         setShowUploadPrompt(Boolean(err && err.needsUpload));
         setLoading(false);
         setIsFetching(false);
@@ -623,6 +627,7 @@ export function useDataFetching({
     },
     [
       apiUrl,
+      sessionId,
       bins,
       configSourceLabel,
       dataMapping,
@@ -821,6 +826,7 @@ export function useDataFetching({
             localTraceText,
             {
               signal: controller.signal,
+              sessionId,
               lanes: ENABLE_VIEWPORT_LANE_FILTER ? lanes : [],
               viewportPxWidth,
               pixelWindow,
@@ -1275,6 +1281,7 @@ export function useDataFetching({
     };
   }, [
     apiUrl,
+    sessionId,
     autoAnalyzeOnFirstLoad,
     bins,
     dataMapping,

@@ -58,6 +58,7 @@ export function buildProcessStats(events: any[]): Map<string, any> {
 
 export interface FetchViewportOptions {
   signal?: AbortSignal;
+  sessionId?: string;
   lanes?: string[];
   viewportPxWidth?: number;
   pixelWindow?: number;
@@ -76,6 +77,7 @@ export async function fetchData(
     const params = new URLSearchParams();
     params.set('begin', String(begin));
     params.set('end', String(end));
+    if (options.sessionId) params.set('session', String(options.sessionId));
     if (Number.isFinite(Number(bins))) params.set('bins', String(bins));
     if (Number.isFinite(Number(options.viewportPxWidth))) {
       params.set('viewportPxWidth', String(options.viewportPxWidth));
@@ -97,7 +99,32 @@ export async function fetchData(
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      let payload: any = null;
+      let bodyText = '';
+      try {
+        const ct = response.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          payload = await response.json();
+        } else {
+          bodyText = await response.text();
+        }
+      } catch {
+        // ignore body parse errors
+      }
+
+      const message =
+        payload?.error ||
+        payload?.message ||
+        bodyText ||
+        `HTTP error! status: ${response.status}`;
+
+      const err: any = new Error(String(message));
+      err.status = response.status;
+      err.payload = payload;
+      if (payload?.needsUpload || payload?.needs_upload) {
+        err.needsUpload = true;
+      }
+      throw err;
     }
 
     const rawData = await response.json();
@@ -228,18 +255,26 @@ export async function fetchDataWithFallback(
   localTraceText: string,
   options: FetchViewportOptions = {}
 ): Promise<any> {
-  if (localTraceText) {
-    try {
-      return buildFrontendPayloadFromText(localTraceText);
-    } catch (e) {
-      console.warn('[data] local upload invalid, ignoring:', e);
-      // Fall through to backend/frontend attempts.
-    }
-  }
-
   try {
     return await fetchData(begin, end, bins, apiUrl, options);
   } catch (backendError: any) {
+    const backendNeedsUpload = Boolean(
+      backendError?.needsUpload || backendError?.needs_upload || backendError?.status === 409
+    );
+    if (backendNeedsUpload) {
+      backendError.needsUpload = true;
+      throw backendError;
+    }
+
+    if (localTraceText) {
+      try {
+        return buildFrontendPayloadFromText(localTraceText);
+      } catch (e) {
+        console.warn('[data] local upload invalid, ignoring:', e);
+        // Fall through to frontend trace fallback.
+      }
+    }
+
     console.warn('[data] backend unavailable, falling back to frontend trace:', backendError);
     try {
       return await fetchFrontendData(traceUrl, options);

@@ -9,6 +9,7 @@ export type StreamingProviderOptions = {
   bins: number;
   filters?: any[];
   signal?: AbortSignal;
+  sessionId?: string;
   fullData?: any[];
 };
 
@@ -25,6 +26,7 @@ export const createApiStreamingProvider = (): StreamingDataProvider => ({
     }
     const viewportOptions: FetchViewportOptions & { summary?: number } = {
       signal: options.signal,
+      sessionId: options.sessionId,
       lanes: request.laneIds,
       viewportPxWidth: request.viewportPxWidth,
       pixelWindow: request.summaryLevel,

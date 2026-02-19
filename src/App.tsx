@@ -59,12 +59,11 @@ type ViewRange = { start: number; end: number };
 type WidgetBinding = { element: Element; event: string; handler: EventListener };
 
 // API configuration: use same origin in browser so requests hit the server the user is visiting.
-// const API_URL =
-//   process.env.REACT_APP_API_URL ||
-//   (typeof window !== 'undefined'
-//     ? `${window.location.origin}/get-events`
-//     : 'http://127.0.0.1:8080/get-events');
-const API_URL = 'http://127.0.0.1:8080/get-events';
+const API_URL =
+  process.env.REACT_APP_API_URL ||
+  (typeof window !== 'undefined'
+    ? `${window.location.origin}/get-events`
+    : 'http://127.0.0.1:8080/get-events');
 // Use same origin at runtime so export goes to the server the user is visiting (avoids
 // deploy builds with localhost baking in and requests hitting the visitor's machine).
 const EXPORT_ANYWIDGET_URL =
@@ -116,7 +115,7 @@ function App() {
   const [rawEvents, setRawEvents] = useState<any[] | null>(null);
   const [dataMapping, setDataMapping] = useState<GanttDataMapping | null>(null); // Universal data mapping
   const [loading, setLoading] = useState(true);
-  const [, setIsFetching] = useState(false);
+  const [isFetching, setIsFetching] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [obd, setObd] = useState<[number, number, number]>([0, DEFAULT_END_US, 1]); // [begin, end, bins]
@@ -211,8 +210,243 @@ function App() {
   const [localTraceText, setLocalTraceText] = useState('');
   const [localTraceName, setLocalTraceName] = useState('');
   const [showUploadPrompt, setShowUploadPrompt] = useState(false);
+  const [backendHealth, setBackendHealth] = useState<any | null>(null);
+  const [isUploadingTrace, setIsUploadingTrace] = useState(false);
+  const [isReadingTrace, setIsReadingTrace] = useState(false);
+  const [isUploadDragOver, setIsUploadDragOver] = useState(false);
+  const [uploadUiMessage, setUploadUiMessage] = useState<string | null>(null);
   const [showApiConfig, setShowApiConfig] = useState(false);
+  const traceFileInputRef = useRef<HTMLInputElement | null>(null);
   const configFileInputRef = useRef<HTMLInputElement | null>(null);
+  const sessionId = useMemo(() => parseSessionIdFromHash() || '', []);
+
+  const getApiOrigin = useCallback(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      const u = new URL(API_URL, window.location.origin);
+      return u.origin;
+    } catch {
+      return '';
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!showUploadPrompt) {
+      setBackendHealth(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    const origin = getApiOrigin();
+    if (!origin) return () => {
+      cancelled = true;
+    };
+
+    const healthUrl = sessionId
+      ? `${origin}/health?session=${encodeURIComponent(sessionId)}`
+      : `${origin}/health`;
+    fetch(healthUrl, { cache: 'no-store' })
+      .then((res) => {
+        if (!res.ok) throw new Error(`health http ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (cancelled) return;
+        setBackendHealth(json);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBackendHealth({ status: 'unreachable' });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getApiOrigin, showUploadPrompt, sessionId]);
+
+  const uploadTraceToBackend = useCallback(
+    async (file: File): Promise<boolean> => {
+      const origin = getApiOrigin();
+      if (!origin) {
+        setError('Backend URL is not configured.');
+        setUploadUiMessage('Backend URL is not configured or invalid.');
+        setShowUploadPrompt(true);
+        return false;
+      }
+
+      setUploadUiMessage(null);
+      setIsUploadingTrace(true);
+      try {
+        const form = new FormData();
+        form.append('file', file, file.name);
+        form.append('format', 'auto');
+
+        const uploadUrl = sessionId
+          ? `${origin}/api/upload-trace?session=${encodeURIComponent(sessionId)}`
+          : `${origin}/api/upload-trace`;
+        const resp = await fetch(uploadUrl, {
+          method: 'POST',
+          body: form
+        });
+
+        let payload: any = null;
+        const contentType = resp.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          // Most common cause: hitting the React dev server (returns index.html 200).
+          const text = await resp.text().catch(() => '');
+          const snippet = text ? text.slice(0, 200).replace(/\s+/g, ' ') : '';
+          throw new Error(
+            `Upload endpoint did not return JSON (got "${contentType || 'unknown'}"). ` +
+              `You are likely not proxying /api/upload-trace to the backend. ` +
+              `If using "npm start", set REACT_APP_API_URL=http://127.0.0.1:8080/get-events and restart, ` +
+              `or configure nginx to proxy /api/upload-trace to :8080. ` +
+              (snippet ? `Response starts with: ${snippet}` : '')
+          );
+        }
+
+        try {
+          payload = await resp.json();
+        } catch (e) {
+          throw new Error(
+            'Upload endpoint returned invalid JSON. Check that /api/upload-trace is served by the Python backend.'
+          );
+        }
+
+        if (!resp.ok) {
+          const msg =
+            payload?.error ||
+            payload?.message ||
+            `Upload failed (HTTP ${resp.status}).`;
+          throw new Error(String(msg));
+        }
+        if (payload?.ok !== true) {
+          const msg =
+            payload?.error ||
+            payload?.message ||
+            'Upload failed: backend did not return ok=true.';
+          throw new Error(String(msg));
+        }
+
+        // Clear local text mode so fetch path uses backend.
+        setLocalTraceText('');
+        setLocalTraceName(file.name || 'uploaded trace');
+        setError(null);
+        setUploadUiMessage(null);
+        setShowUploadPrompt(false);
+        setLoading(true);
+        setIsFetching(true);
+        return true;
+      } catch (e: any) {
+        const raw = e?.message ? String(e.message) : '';
+        let friendly = 'Upload failed. Please check that the backend server is available.';
+        if (raw && /not configured/i.test(raw)) {
+          friendly = 'Backend URL is not configured or invalid.';
+        } else if (raw && /(did not return json|not proxying|proxy)/i.test(raw)) {
+          friendly =
+            'Upload endpoint is not connected to the backend (missing proxy / reverse proxy configuration).';
+        } else if (raw && /(failed to fetch|networkerror)/i.test(raw)) {
+          friendly = 'Cannot reach the backend. Make sure it is running and reachable.';
+        } else if (raw) {
+          const trimmed = raw.length > 240 ? `${raw.slice(0, 240)}…` : raw;
+          friendly = `Upload failed: ${trimmed}`;
+        }
+        setError(raw || 'Upload failed.');
+        setUploadUiMessage(friendly);
+        setShowUploadPrompt(true);
+        return false;
+      } finally {
+        setIsUploadingTrace(false);
+      }
+    },
+    [
+      getApiOrigin,
+      sessionId,
+      setError,
+      setIsFetching,
+      setLoading,
+      setLocalTraceName,
+      setLocalTraceText,
+      setShowUploadPrompt,
+      setUploadUiMessage
+    ]
+  );
+
+  const readFileAsText = useCallback((file: File) => {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Failed to read uploaded file.'));
+      reader.readAsText(file);
+    });
+  }, []);
+
+  const handleTraceFileSelected = useCallback(
+    async (file: File) => {
+      setUploadUiMessage(null);
+      const name = String(file.name || '').toLowerCase();
+      const isTextTrace = name.endsWith('.pfw') || name.endsWith('.json') || name.endsWith('.txt');
+      const isSqlite = name.endsWith('.sqlite') || name.endsWith('.db');
+      const isOtf2Archive =
+        name.endsWith('.zip') || name.endsWith('.tar.gz') || name.endsWith('.tgz') || name.endsWith('.tar');
+
+      const backendStatus = backendHealth?.status;
+      const backendRunning = backendStatus === 'healthy';
+      const backendUnreachable = backendStatus === 'unreachable';
+
+      // When backend is running, always upload so the backend serves data to the frontend.
+      // For .sqlite/.zip/.tar.gz/.tgz/.tar (OTF2) uploads, backend is required.
+      if (backendRunning || isSqlite || isOtf2Archive) {
+        await uploadTraceToBackend(file);
+        return;
+      }
+
+      // Fallback: parse local text-based trace only when backend is unavailable.
+      if (!isTextTrace) {
+        setError(
+          'This file type requires the backend. Start the backend to upload .sqlite/.zip/.tar.gz/.tgz, or upload a .pfw/.json/.txt.'
+        );
+        setUploadUiMessage('This file type requires the backend. Please start it and try again.');
+        setShowUploadPrompt(true);
+        return;
+      }
+
+      // If backend status is unknown (health still pending), try uploading first.
+      if (!backendUnreachable) {
+        const ok = await uploadTraceToBackend(file);
+        if (ok) return;
+      }
+
+      setIsReadingTrace(true);
+      try {
+        const text = await readFileAsText(file);
+        setLocalTraceText(text);
+        setLocalTraceName(file.name || 'uploaded trace');
+        setError(null);
+        setShowUploadPrompt(false);
+        setLoading(true);
+        setIsFetching(true);
+      } catch (e: any) {
+        setError(e?.message ? String(e.message) : 'Failed to read uploaded file.');
+        setUploadUiMessage('Failed to read the file. Please retry or check the file format.');
+        setShowUploadPrompt(true);
+      } finally {
+        setIsReadingTrace(false);
+      }
+    },
+    [
+      backendHealth?.status,
+      readFileAsText,
+      uploadTraceToBackend,
+      setError,
+      setIsFetching,
+      setLoading,
+      setLocalTraceName,
+      setLocalTraceText,
+      setShowUploadPrompt,
+      setUploadUiMessage
+    ]
+  );
 
   // Image storage for LLM
   const {
@@ -674,6 +908,7 @@ function App() {
     viewStateRef,
     apiUrl: API_URL,
     traceUrl: FRONTEND_TRACE_URL,
+    sessionId,
     defaultEndUs: DEFAULT_END_US,
     setIsFetching,
     setData,
@@ -1100,71 +1335,119 @@ function App() {
     onApplyDataMapping: applyMappingToRawEvents
   });
 
-  if (loading && (!data || data.length === 0)) {
-    return (
-      <div className="App">
-        <div className="loading">Loading events...</div>
-      </div>
-    );
-  }
+  const hasAnyTraceEvents = useMemo(() => {
+    const rawCount = Array.isArray(rawEvents) ? rawEvents.length : 0;
+    const transformedCount = Array.isArray(data) ? data.length : 0;
+    return rawCount > 0 || transformedCount > 0;
+  }, [rawEvents, data]);
 
-  if (error) {
+  const showUploadScreen = showUploadPrompt || !hasAnyTraceEvents;
+  const uploadBusy =
+    isUploadingTrace || isReadingTrace || isFetching || isAnalyzing || isSoaPacking || isMappingProcessing;
+  const uploadBusyLabel = isUploadingTrace
+    ? 'Uploading…'
+    : isReadingTrace
+      ? 'Reading file…'
+      : isAnalyzing || isSoaPacking || isMappingProcessing
+        ? 'Processing data…'
+        : isFetching || loading
+          ? 'Loading data…'
+          : null;
+
+  if (showUploadScreen) {
+    const backendStatus = backendHealth?.status;
+    const backendStatusText =
+      backendStatus === 'healthy'
+        ? 'Backend: connected'
+        : backendStatus === 'unreachable'
+          ? 'Backend: unreachable'
+          : 'Backend: unknown';
+    const selectedName = localTraceName ? String(localTraceName) : '';
+    const subtitlePrefix = error ? 'No usable data detected yet. ' : '';
+    const subtitle = `${subtitlePrefix}Select a trace file to start visualizing. Supports .pfw/.json/.txt (can be parsed locally when the backend is down); .sqlite/.db/.zip/.tar.gz (OTF2) requires the backend.`;
+
     return (
       <div className="App">
-        <div className="error">
-          <div
-            style={{
-              backgroundColor: '#fee',
-              border: '1px solid #fcc',
-              padding: '15px',
-              borderRadius: '4px',
-              color: '#c33',
-              textAlign: 'center',
-              fontFamily: 'system-ui'
-            }}
-          >
-            Error loading data: {error}
-            <br />
-            Start the API server at {API_URL}, place {FRONTEND_TRACE_LABEL} in the public folder, or
-            upload a trace file.
-          </div>
-        </div>
-        {showUploadPrompt && (
-          <div className="upload-row">
-            <label className="upload-label">
-              Upload trace file
-              <input
-                type="file"
-                accept=".pfw,.json,.txt"
-                onChange={(e) => {
-                  const file = e.target.files && e.target.files[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    const text = String(reader.result || '');
-                    setLocalTraceText(text);
-                    setLocalTraceName(file.name || 'uploaded trace');
-                    setError(null);
-                    setShowUploadPrompt(false);
-                    setLoading(true);
-                    setIsFetching(true);
-                  };
-                  reader.onerror = () => {
-                    setError('Failed to read uploaded file.');
-                  };
-                  reader.readAsText(file);
-                }}
-              />
-            </label>
-            {localTraceName ? (
-              <span className="upload-hint">Using local file: {localTraceName}</span>
-            ) : (
-              <span className="upload-hint">
-                Used when backend and public trace are unavailable
+        <div className="centered-screen">
+          <div className="upload-card">
+            <div className="upload-card-header">
+              <h2 className="upload-title">Upload Trace Data</h2>
+              <p className="upload-subtitle">{subtitle}</p>
+            </div>
+
+            <div
+              className={`upload-dropzone ${isUploadDragOver ? 'dragover' : ''}`}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsUploadDragOver(true);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsUploadDragOver(false);
+              }}
+              onDrop={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsUploadDragOver(false);
+                const file = e.dataTransfer?.files?.[0];
+                if (!file) return;
+                await handleTraceFileSelected(file);
+              }}
+            >
+              <div className="upload-dropzone-inner">
+                <input
+                  ref={traceFileInputRef}
+                  type="file"
+                  accept=".pfw,.json,.txt,.sqlite,.db,.zip,.tar.gz,.tgz,.tar"
+                  style={{ display: 'none' }}
+                  onChange={async (e) => {
+                    const file = e.target.files && e.target.files[0];
+                    if (!file) return;
+                    // Allow re-selecting the same file to re-trigger upload.
+                    e.currentTarget.value = '';
+                    await handleTraceFileSelected(file);
+                  }}
+                  disabled={isUploadingTrace || isReadingTrace}
+                />
+                <button
+                  type="button"
+                  className="upload-primary"
+                  onClick={() => traceFileInputRef.current?.click()}
+                  disabled={isUploadingTrace || isReadingTrace}
+                >
+                  Choose file
+                </button>
+                <div className="upload-secondary">or drag and drop here</div>
+              </div>
+            </div>
+
+            <div className="upload-meta">
+              <span>
+                <strong>Current</strong> {selectedName ? `Selected: ${selectedName}` : 'No file selected'}
               </span>
+              <span>{backendStatusText}</span>
+            </div>
+
+            {uploadUiMessage && (
+              <div className="upload-loading" role="status" aria-live="polite">
+                <span>{uploadUiMessage}</span>
+              </div>
+            )}
+
+            {uploadBusy && uploadBusyLabel && (
+              <div className="upload-loading" role="status" aria-live="polite">
+                <div className="upload-spinner" />
+                <span>{uploadBusyLabel}</span>
+              </div>
             )}
           </div>
-        )}
+        </div>
       </div>
     );
   }
@@ -1172,7 +1455,9 @@ function App() {
   if (!obd) {
     return (
       <div className="App">
-        <div className="loading">Initializing...</div>
+        <div className="centered-screen">
+          <div className="loading">Initializing...</div>
+        </div>
       </div>
     );
   }
