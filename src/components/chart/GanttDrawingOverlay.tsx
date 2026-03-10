@@ -176,87 +176,51 @@ export const GanttDrawingOverlay = forwardRef<GanttDrawingOverlayHandle, GanttDr
     const [overlayStyle, setOverlayStyle] = useState({ width: 0, height: 0, top: 0, left: 0 });
     const prevStyleRef = useRef(overlayStyle);
 
-    // Sync overlay position and size with the actual chart SVG
+    // Sync overlay position and size to the visible chart area (works with shared scroll container)
     useEffect(() => {
       const updateOverlayPosition = () => {
-        // Find the chart SVG (the actual Observable Plot SVG)
         const chartContainer = document.querySelector('.chart-container');
-        if (!chartContainer) return;
+        const scrollBody = chartContainer?.querySelector('.gantt-scroll-body');
+        const yAxisEl = chartContainer?.querySelector('.gantt-yaxis');
+        if (!chartContainer || !scrollBody) return;
 
-        const chartDiv = chartContainer.querySelector('.chart');
-        if (!chartDiv) return;
-
-        // Find the main chart SVG (largest SVG in the chart area)
-        // Observable Plot used to wrap charts in <figure>, but our d3 gantt renders raw <svg>.
-        const figure = chartDiv.querySelector('figure');
-        const svgs = figure
-          ? Array.from(figure.querySelectorAll('svg'))
-          : Array.from(chartDiv.querySelectorAll('svg'));
-
-        let chartSVG: SVGElement | null = null;
-        let maxArea = 0;
-        for (const svg of svgs) {
-          const rect = svg.getBoundingClientRect();
-          const area = rect.width * rect.height;
-          if (area > maxArea) {
-            maxArea = area;
-            chartSVG = svg;
-          }
-        }
-
-        if (!chartSVG) return;
-
-        // Get chart SVG and container positions
-        const svgRect = chartSVG.getBoundingClientRect();
         const containerRect = chartContainer.getBoundingClientRect();
+        const scrollBodyRect = scrollBody.getBoundingClientRect();
+        const yAxisWidth = yAxisEl ? yAxisEl.getBoundingClientRect().width : 0;
 
-        // Calculate position relative to container
+        // Overlay covers the chart portion of the visible scroll viewport (right of y-axis)
         const newStyle = {
-          width: svgRect.width,
-          height: svgRect.height,
-          left: svgRect.left - containerRect.left,
-          top: svgRect.top - containerRect.top
+          width: Math.max(0, scrollBodyRect.width - yAxisWidth),
+          height: Math.max(0, scrollBodyRect.height),
+          left: scrollBodyRect.left + yAxisWidth - containerRect.left,
+          top: scrollBodyRect.top - containerRect.top
         };
 
-        // Log only if position changed significantly (avoid spam)
         const prev = prevStyleRef.current;
         const changed =
           Math.abs(newStyle.width - prev.width) > 1 ||
           Math.abs(newStyle.height - prev.height) > 1 ||
           Math.abs(newStyle.left - prev.left) > 1 ||
           Math.abs(newStyle.top - prev.top) > 1;
-
-        if (changed) {
-          console.log('📐 Overlay positioning:');
-          console.log('  Size:', `${newStyle.width.toFixed(1)}x${newStyle.height.toFixed(1)}`);
-          console.log('  Position:', `(${newStyle.left.toFixed(1)}, ${newStyle.top.toFixed(1)})`);
-          console.log('  SVG screen pos:', `(${svgRect.left.toFixed(1)}, ${svgRect.top.toFixed(1)})`);
-          console.log(
-            '  Container screen pos:',
-            `(${containerRect.left.toFixed(1)}, ${containerRect.top.toFixed(1)})`
-          );
-          prevStyleRef.current = newStyle;
-        }
-
+        if (changed) prevStyleRef.current = newStyle;
         setOverlayStyle(newStyle);
       };
 
-      // Update on mount, when active state changes, or window resize
       updateOverlayPosition();
 
-      const resizeObserver = new ResizeObserver(updateOverlayPosition);
       const chartContainer = document.querySelector('.chart-container');
-      if (chartContainer) {
-        resizeObserver.observe(chartContainer);
+      const scrollBody = chartContainer?.querySelector('.gantt-scroll-body');
+      const resizeObserver = new ResizeObserver(updateOverlayPosition);
+      if (chartContainer) resizeObserver.observe(chartContainer);
+      if (scrollBody) {
+        scrollBody.addEventListener('scroll', updateOverlayPosition);
       }
-
       window.addEventListener('resize', updateOverlayPosition);
-
-      // Also update periodically in case chart updates
-      const interval = setInterval(updateOverlayPosition, 500);
+      const interval = setInterval(updateOverlayPosition, 300);
 
       return () => {
         resizeObserver.disconnect();
+        if (scrollBody) scrollBody.removeEventListener('scroll', updateOverlayPosition);
         window.removeEventListener('resize', updateOverlayPosition);
         clearInterval(interval);
       };
@@ -361,25 +325,15 @@ export const GanttDrawingOverlay = forwardRef<GanttDrawingOverlayHandle, GanttDr
       try {
         console.log('Starting chart export with', paths.length, 'drawing paths...');
 
-        // Find the chart container
+        // Export full left panel (widgets + chart with y-axis and topbar), excluding customization panel
         const chartContainer = document.querySelector('.chart-container');
-        if (!chartContainer) {
-          console.error('Chart container not found');
+        const leftPanel = chartContainer?.closest('.left-panel');
+        const exportRoot = (leftPanel || chartContainer) as HTMLElement;
+        if (!exportRoot) {
+          console.error('Export root (left-panel or chart-container) not found');
           return null;
         }
 
-        const chartDiv = chartContainer.querySelector('.chart');
-        if (!chartDiv) {
-          console.error('Chart div not found');
-          return null;
-        }
-
-        // Get dimensions
-        const rect = chartDiv.getBoundingClientRect();
-        console.log('Chart dimensions:', rect.width, 'x', rect.height);
-
-        // Use DOM export method directly (more reliable for Observable Plot)
-        console.log('Using DOM export method...');
         const allPaths = [...paths];
         if (currentPath) {
           allPaths.push({
@@ -388,7 +342,7 @@ export const GanttDrawingOverlay = forwardRef<GanttDrawingOverlayHandle, GanttDr
             width: brushSize
           });
         }
-        return await exportDOMToCanvas(chartContainer as HTMLElement, allPaths);
+        return await exportDOMToCanvas(exportRoot, allPaths);
       } catch (error) {
         console.error('Error exporting annotated chart:', error);
         return null;

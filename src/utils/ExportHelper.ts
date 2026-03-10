@@ -1,5 +1,5 @@
 /**
- * Export chart with drawings - simplified approach
+ * Export the chart (with optional sketch paths) as a PNG blob.
  */
 
 interface DrawingPath {
@@ -9,481 +9,291 @@ interface DrawingPath {
   width?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Small utilities
+// ---------------------------------------------------------------------------
+
+/** Pick the largest SVG inside `root`, optionally skipping the drawing overlay. */
+function findMainSVG(root: Element): SVGElement | null {
+  let best: SVGElement | null = null;
+  let maxArea = 0;
+  for (const el of Array.from(root.querySelectorAll<SVGElement>('svg'))) {
+    if (el.classList.contains('gantt-drawing-canvas-overlay')) continue;
+    const r = el.getBoundingClientRect();
+    const area = r.width * r.height;
+    if (area > maxArea) { maxArea = area; best = el; }
+  }
+  return best;
+}
+
+/** Read pixel dimensions from an SVG: explicit attrs → BBox → viewBox. */
+function getSVGDimensions(svg: SVGElement): { width: number; height: number } {
+  const aw = parseFloat(svg.getAttribute('width') || '0');
+  const ah = parseFloat(svg.getAttribute('height') || '0');
+  if (aw > 0 && ah > 0) return { width: Math.round(aw), height: Math.round(ah) };
+  const r = svg.getBoundingClientRect();
+  if (r.width > 0 && r.height > 0) return { width: Math.round(r.width), height: Math.round(r.height) };
+  const vb = svg.getAttribute('viewBox')?.split(/\s+/);
+  if (vb?.length === 4) return { width: parseFloat(vb[2]), height: parseFloat(vb[3]) };
+  return { width: 0, height: 0 };
+}
+
+/** Render canvas contents as a PNG blob (with a 15 s timeout). */
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Export timeout')), 15_000);
+    canvas.toBlob((blob) => {
+      clearTimeout(timer);
+      blob ? resolve(blob) : reject(new Error('Blob creation failed'));
+    }, 'image/png', 1.0);
+  });
+}
+
+/** Serialize an SVG element and draw it onto ctx at the given size. */
+function drawSVGOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  svg: SVGElement,
+  width: number,
+  height: number
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('SVG load timeout')), 10_000);
+    const url =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent(new XMLSerializer().serializeToString(svg));
+    const img = new Image();
+    img.onload = () => { clearTimeout(timer); ctx.drawImage(img, 0, 0, width, height); resolve(); };
+    img.onerror = () => { clearTimeout(timer); reject(new Error('SVG image load failed')); };
+    img.src = url;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sketch-path rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the affine transform that maps overlay-local sketch coordinates
+ * to export-canvas pixel coordinates.
+ *
+ * The drawing overlay covers the *visible* chart viewport (right of y-axis).
+ * The export canvas covers the full SVG (including the scrolled-away portion),
+ * so scrollTop is added to the Y offset.
+ */
+function getDrawingTransform(
+  container: HTMLElement,
+  referenceSVG: SVGElement,
+  targetWidth: number,
+  targetHeight: number
+): { scaleX: number; scaleY: number; offsetX: number; offsetY: number } | null {
+  const overlay = container.querySelector('.gantt-drawing-canvas-overlay');
+  if (!overlay) return null;
+  const or = overlay.getBoundingClientRect();
+  if (or.width <= 0 || or.height <= 0) return null;
+  const sr = referenceSVG.getBoundingClientRect();
+  const scaleX = targetWidth / or.width;
+  const scaleY = targetHeight / or.height;
+  const offsetX = (or.left - sr.left) * scaleX;
+  let offsetY = (or.top - sr.top) * scaleY;
+  const scrollBody = container.querySelector('.gantt-scroll-body') as HTMLElement | null;
+  if (scrollBody) offsetY += scrollBody.scrollTop * scaleY;
+  return { scaleX, scaleY, offsetX, offsetY };
+}
+
+/** Draw M/L paths onto a canvas context using the given transform. */
+function drawPathsOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  drawings: DrawingPath[],
+  { scaleX, scaleY, offsetX, offsetY }: { scaleX: number; scaleY: number; offsetX: number; offsetY: number }
+) {
+  const scale = Math.max(scaleX, scaleY);
+  for (const p of drawings) {
+    if (!p?.path) continue;
+    ctx.save();
+    ctx.strokeStyle = p.color ?? '#ff0000';
+    ctx.lineWidth = (p.width ?? 3) * scale;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (const m of p.path.matchAll(/([ML])\s*([\d.-]+)\s+([\d.-]+)/g)) {
+      const px = parseFloat(m[2]) * scaleX + offsetX;
+      const py = parseFloat(m[3]) * scaleY + offsetY;
+      m[1] === 'M' ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Full left-panel export (D3 Gantt main path)
+// ---------------------------------------------------------------------------
+
+/**
+ * Capture the entire left panel (widget area + chart topbar + y-axis + chart)
+ * via html2canvas, then overlay sketch paths.
+ *
+ * Falls back to chart-container-only export if html2canvas is unavailable.
+ */
+async function exportFullLeftPanel(
+  leftPanel: HTMLElement,
+  drawings: DrawingPath[] | null | undefined
+): Promise<Blob | null> {
+  let html2canvasFn: (el: HTMLElement, opts?: any) => Promise<HTMLCanvasElement>;
+  try {
+    const mod = await import('html2canvas');
+    html2canvasFn = mod.default;
+  } catch {
+    console.warn('html2canvas unavailable, falling back to chart-container export');
+    const chartContainer = leftPanel.querySelector('.chart-container') as HTMLElement | null;
+    return chartContainer ? exportDOMToCanvas(chartContainer, drawings) : null;
+  }
+
+  const canvas = await html2canvasFn(leftPanel, {
+    width: leftPanel.offsetWidth,
+    height: leftPanel.offsetHeight,
+    useCORS: true,
+    allowTaint: true,
+    backgroundColor: '#ffffff',
+    scale: 1,
+    logging: false
+  });
+
+  if (drawings?.length) {
+    const overlay = leftPanel.querySelector('.gantt-drawing-canvas-overlay');
+    if (overlay) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const pr = leftPanel.getBoundingClientRect();
+        const or = overlay.getBoundingClientRect();
+        drawPathsOnCanvas(ctx, drawings, {
+          scaleX: 1,
+          scaleY: 1,
+          offsetX: or.left - pr.left,
+          offsetY: or.top - pr.top
+        });
+      }
+    }
+  }
+
+  return canvasToBlob(canvas);
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Export the chart with any sketch drawings as a PNG blob.
+ *
+ * Three rendering paths:
+ *   1. `.left-panel` root  → html2canvas full-panel capture  (D3 Gantt, main path)
+ *   2. Observable Plot `<figure>` exists → foreignObject SVG → canvas image
+ *   3. D3 Gantt chart-container → composite WebGL + 2D canvas + dependency SVG
+ */
 export async function exportDOMToCanvas(
   containerElement: HTMLElement,
   drawings: DrawingPath[] | null | undefined
 ): Promise<Blob | null> {
   try {
-    console.log('=== Starting Chart Export ===');
+    // Path 1: full panel via html2canvas
+    if (containerElement.classList.contains('left-panel')) {
+      return exportFullLeftPanel(containerElement, drawings);
+    }
 
-    // Get the chart div
     const chartDiv = containerElement.querySelector('.chart');
-    if (!chartDiv) {
-      console.error('❌ Chart div not found');
-      return null;
-    }
+    if (!chartDiv) { console.error('Chart div (.chart) not found'); return null; }
 
-    console.log('✓ Chart div found');
-
-    // Observable Plot returns a <figure> element containing an SVG
     const figure = chartDiv.querySelector('figure');
+    const svg = findMainSVG(figure ?? chartDiv);
+    if (!svg) { console.error('No chart SVG found'); return null; }
 
-    if (!figure) {
-      console.error('❌ Figure element not found');
-      console.log('Looking for direct SVG instead...');
-      // Fallback: maybe it's just an SVG without figure wrapper
-    }
+    const { width, height } = figure
+      ? (() => { const r = figure.getBoundingClientRect(); return { width: Math.round(r.width), height: Math.round(r.height) }; })()
+      : getSVGDimensions(svg);
 
-    // Get the SVG - need to find the MAIN chart SVG, not legend swatches
-    // Observable Plot's figure contains multiple SVGs: the main chart + legend swatches
-    let svg: SVGElement | null = null;
-
-    if (figure) {
-      // Find all SVGs in the figure
-      const svgsInFigure = Array.from(figure.querySelectorAll('svg'));
-      console.log('Found', svgsInFigure.length, 'SVG elements in figure');
-
-      // Pick the largest one (main chart is biggest)
-      let maxArea = 0;
-      for (const svgEl of svgsInFigure) {
-        const rect = svgEl.getBoundingClientRect();
-        const area = rect.width * rect.height;
-        console.log('SVG:', rect.width, 'x', rect.height, '=', area, 'px²');
-        if (area > maxArea) {
-          maxArea = area;
-          svg = svgEl;
-        }
-      }
-    } else {
-      // If no figure, look for SVG but exclude the drawing overlay
-      const allSvgs = Array.from(chartDiv.querySelectorAll('svg'));
-      let maxArea = 0;
-      for (const svgEl of allSvgs) {
-        // Skip the drawing overlay
-        if (svgEl.classList.contains('gantt-drawing-canvas-overlay')) {
-          continue;
-        }
-        const rect = svgEl.getBoundingClientRect();
-        const area = rect.width * rect.height;
-        if (area > maxArea) {
-          maxArea = area;
-          svg = svgEl;
-        }
-      }
-    }
-
-    if (!svg) {
-      console.error('❌ SVG not found');
-      console.log('Chart div HTML:', chartDiv.innerHTML.substring(0, 500));
+    if (width < 10 || height < 10) {
+      console.error('Invalid export dimensions:', width, 'x', height);
       return null;
     }
 
-    console.log('✓ Main chart SVG selected (largest)');
-    console.log('SVG class:', svg.getAttribute('class'));
-    console.log('SVG has children:', svg.children.length);
-
-    // We need to export the entire figure (which includes legend), not just the SVG
-    let exportElement: Element = svg;
-    let width = 0;
-    let height = 0;
-
-    // If there's a figure, export the entire figure (includes chart + legend)
-    if (figure) {
-      exportElement = figure;
-      const figureRect = figure.getBoundingClientRect();
-      width = Math.round(figureRect.width);
-      height = Math.round(figureRect.height);
-      console.log('✓ Exporting entire figure (includes legend)');
-      console.log('Figure dimensions:', width, 'x', height);
-    } else {
-      // No figure, just export the SVG
-      const svgRect = svg.getBoundingClientRect();
-      width = Math.round(svgRect.width);
-      height = Math.round(svgRect.height);
-      console.log('SVG BBox dimensions:', width, 'x', height);
-    }
-
-    // Try 3: Get from SVG width/height attributes
-    if (width === 0 || height === 0) {
-      const attrWidth = svg.getAttribute('width');
-      const attrHeight = svg.getAttribute('height');
-      if (attrWidth && attrHeight) {
-        width = parseFloat(attrWidth);
-        height = parseFloat(attrHeight);
-        console.log('SVG attribute dimensions:', width, 'x', height);
-      }
-    }
-
-    // Try 4: Get from viewBox
-    if (width === 0 || height === 0) {
-      const viewBox = svg.getAttribute('viewBox');
-      if (viewBox) {
-        const parts = viewBox.split(/\s+/);
-        if (parts.length === 4) {
-          width = parseFloat(parts[2]);
-          height = parseFloat(parts[3]);
-          console.log('ViewBox dimensions:', width, 'x', height);
-        }
-      }
-    }
-
-    console.log('Final dimensions:', width, 'x', height);
-    console.log('SVG width attr:', svg.getAttribute('width'));
-    console.log('SVG height attr:', svg.getAttribute('height'));
-    console.log('SVG viewBox:', svg.getAttribute('viewBox'));
-    console.log('Number of drawings:', drawings ? drawings.length : 0);
-
-    if (width === 0 || height === 0 || width < 100 || height < 100) {
-      console.error('❌ Invalid or suspiciously small dimensions:', width, 'x', height);
-      console.error('This might be a legend or small element, not the main chart');
-      return null;
-    }
-
-    // Create canvas
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d', { alpha: false });
-
-    if (!ctx) {
-      console.error('❌ Could not get canvas context');
-      return null;
-    }
-
-    console.log('✓ Canvas created:', width, 'x', height);
-
-    // White background
-    ctx.fillStyle = 'white';
+    if (!ctx) { console.error('Could not get canvas context'); return null; }
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, height);
 
-    // Create wrapper SVG for export
-    let finalSVG: SVGElement;
-
-    if (exportElement === figure) {
-      // Export the entire figure (chart + legend) using foreignObject
-      console.log('Creating SVG wrapper for figure (includes legend)...');
-
-      finalSVG = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      finalSVG.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-      finalSVG.setAttribute('width', width.toString());
-      finalSVG.setAttribute('height', height.toString());
-
-      // Clone the figure
-      const figureClone = figure.cloneNode(true) as HTMLElement;
-      inlineAllStyles(figure, figureClone);
-
-      // Find the main SVG in the cloned figure to add drawings
-      const clonedSVGs = Array.from(figureClone.querySelectorAll('svg'));
-      let mainSVGClone: SVGElement | null = null;
-      let maxArea = 0;
-      for (const svgEl of clonedSVGs) {
-        const area =
-          parseFloat(svgEl.getAttribute('width') || '0') *
-          parseFloat(svgEl.getAttribute('height') || '0');
-        if (area > maxArea) {
-          maxArea = area;
-          mainSVGClone = svgEl;
-        }
-      }
-
-      // Wrap figure in foreignObject
-      const foreignObject = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
-      foreignObject.setAttribute('width', width.toString());
-      foreignObject.setAttribute('height', height.toString());
-      foreignObject.setAttribute('x', '0');
-      foreignObject.setAttribute('y', '0');
-      foreignObject.appendChild(figureClone);
-      finalSVG.appendChild(foreignObject);
-
-      // Now add drawings to the main SVG clone if found
-      if (mainSVGClone && drawings && drawings.length > 0) {
-        console.log('Adding drawings to main SVG within figure...');
-        addDrawingsToSVG(mainSVGClone, drawings, containerElement, svg);
-      }
+    if (figure) {
+      // Path 2: Observable Plot — wrap figure in foreignObject SVG and render as image
+      const exportSVG = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      exportSVG.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      exportSVG.setAttribute('width', String(width));
+      exportSVG.setAttribute('height', String(height));
+      const fo = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+      fo.setAttribute('width', String(width));
+      fo.setAttribute('height', String(height));
+      fo.setAttribute('x', '0');
+      fo.setAttribute('y', '0');
+      const clone = figure.cloneNode(true) as HTMLElement;
+      inlineAllStyles(figure, clone);
+      fo.appendChild(clone);
+      exportSVG.appendChild(fo);
+      await drawSVGOnCanvas(ctx, exportSVG, width, height);
     } else {
-      // Export just the SVG (no figure)
-      console.log('Exporting SVG only...');
-      finalSVG = svg.cloneNode(true) as SVGElement;
-
-      // Set proper SVG attributes
-      finalSVG.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-      finalSVG.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-      finalSVG.setAttribute('width', width.toString());
-      finalSVG.setAttribute('height', height.toString());
-
-      // Inline all styles
-      console.log('Inlining styles...');
-      inlineAllStyles(svg, finalSVG);
-
-      // Add drawings
-      if (drawings && drawings.length > 0) {
-        addDrawingsToSVG(finalSVG, drawings, containerElement, svg);
-      }
-    }
-
-    // Serialize SVG
-    const serializer = new XMLSerializer();
-    let svgString = serializer.serializeToString(finalSVG);
-
-    console.log('✓ SVG serialized, length:', svgString.length);
-    console.log('Preview:', svgString.substring(0, 200));
-
-    // Create data URL
-    const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
-
-    // Load and render
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-
-      const timeout = setTimeout(() => {
-        console.error('⏱️ Timeout after 15s');
-        reject(new Error('Timeout'));
-      }, 15000);
-
-      img.onload = () => {
-        clearTimeout(timeout);
-        console.log('✅ Image loaded:', img.naturalWidth, 'x', img.naturalHeight);
-        console.log('Drawing to canvas:', width, 'x', height);
-
-        try {
-          // Draw to canvas
-          ctx.drawImage(img, 0, 0, width, height);
-
-          // Verify content
-          const sample = ctx.getImageData(Math.floor(width / 2), Math.floor(height / 2), 1, 1);
-          console.log('Center pixel:', Array.from(sample.data).slice(0, 3));
-
-          // Check if we have actual content (not just white)
-          const hasContent =
-            sample.data[0] !== 255 || sample.data[1] !== 255 || sample.data[2] !== 255;
-          console.log('Has non-white content:', hasContent);
-
-          // Convert to PNG
-          canvas.toBlob(
-            (blob) => {
-              if (blob) {
-                console.log('✅ Export complete!', (blob.size / 1024).toFixed(1), 'KB');
-                resolve(blob);
-              } else {
-                console.error('❌ Blob creation failed');
-                reject(new Error('Blob creation failed'));
-              }
-            },
-            'image/png',
-            1.0
-          );
-        } catch (err) {
-          console.error('❌ Canvas error:', err);
-          reject(err);
+      // Path 3: D3 Gantt — composite canvas layers then dependency SVG
+      const drawCanvas = (src: HTMLCanvasElement | null) => {
+        if (src && src.width > 0 && src.height > 0) {
+          try { ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, width, height); } catch (_) {}
         }
       };
-
-      img.onerror = (err) => {
-        clearTimeout(timeout);
-        console.error('❌ Image load failed:', err);
-        console.log('Data URL length:', svgDataUrl.length);
-        console.log('SVG sample:\n', svgString.substring(0, 1000));
-        reject(new Error('Image load failed'));
-      };
-
-      img.src = svgDataUrl;
-      console.log('Loading image from data URL...');
-    });
-  } catch (error) {
-    console.error('❌ Fatal error:', error);
-    if (error instanceof Error) {
-      console.error(error.stack);
+      drawCanvas(chartDiv.querySelector<HTMLCanvasElement>('.gantt-webgl'));
+      drawCanvas(chartDiv.querySelector<HTMLCanvasElement>('.gantt-canvas'));
+      await drawSVGOnCanvas(ctx, svg, width, height);
     }
+
+    // Overlay sketch paths on top of the chart layers
+    const transform = getDrawingTransform(containerElement, svg, width, height);
+    if (transform && drawings?.length) drawPathsOnCanvas(ctx, drawings, transform);
+
+    return canvasToBlob(canvas);
+  } catch (err) {
+    console.error('Export failed:', err);
     return null;
   }
 }
 
-/**
- * Helper function to add drawings to an SVG element
- */
-function addDrawingsToSVG(
-  svgElement: SVGElement,
-  drawings: DrawingPath[],
-  containerElement: HTMLElement,
-  originalSVG: SVGElement
-) {
-  console.log('Adding', drawings.length, 'annotations...');
+// ---------------------------------------------------------------------------
+// Style inlining (used for Observable Plot figure clones)
+// ---------------------------------------------------------------------------
 
-  // Get the drawing overlay and chart SVG positions
-  const drawingOverlay = containerElement.querySelector('.gantt-drawing-canvas-overlay');
-
-  if (!drawingOverlay) {
-    console.warn('Drawing overlay not found, adding paths without transformation');
-  }
-
-  // Get actual screen positions
-  const overlayRect = drawingOverlay ? drawingOverlay.getBoundingClientRect() : null;
-  const svgRect = originalSVG.getBoundingClientRect();
-
-  console.log(
-    'Drawing overlay rect:',
-    overlayRect
-      ? `${overlayRect.width}x${overlayRect.height} at (${overlayRect.left}, ${overlayRect.top})`
-      : 'not found'
-  );
-  console.log(
-    'Chart SVG rect:',
-    `${svgRect.width}x${svgRect.height} at (${svgRect.left}, ${svgRect.top})`
-  );
-
-  // Get SVG dimensions for scaling
-  const svgWidth = parseFloat(svgElement.getAttribute('width') || '0') || svgRect.width;
-  const svgHeight = parseFloat(svgElement.getAttribute('height') || '0') || svgRect.height;
-
-  // Calculate transformation parameters
-  let scaleX = 1;
-  let scaleY = 1;
-  let offsetX = 0;
-  let offsetY = 0;
-
-  if (overlayRect && svgRect) {
-    console.log('=== Coordinate Mapping ===');
-    // Scale from overlay screen size to SVG screen size, then to export size
-    scaleX = svgWidth / overlayRect.width;
-    scaleY = svgHeight / overlayRect.height;
-
-    // Position offset
-    const posOffsetX = overlayRect.left - svgRect.left;
-    const posOffsetY = overlayRect.top - svgRect.top;
-
-    offsetX = posOffsetX * scaleX;
-    offsetY = posOffsetY * scaleY;
-
-    console.log('  Scale:', scaleX.toFixed(6), 'x', scaleY.toFixed(6));
-    console.log('  Offset:', offsetX.toFixed(3), ',', offsetY.toFixed(3));
-  }
-
-  const annotationsGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  annotationsGroup.setAttribute('class', 'export-annotations');
-
-  let addedCount = 0;
-  drawings.forEach((pathData, index) => {
-    if (pathData && pathData.path) {
-      const transformedPath = transformPathCoordinates(
-        pathData.path,
-        scaleX,
-        scaleY,
-        offsetX,
-        offsetY
-      );
-
-      if (index === 0) {
-        console.log('First path transform example:', pathData.path.substring(0, 80), '...');
-      }
-
-      const pathElement = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      pathElement.setAttribute('d', transformedPath);
-      pathElement.setAttribute('stroke', pathData.color || '#ff0000');
-      pathElement.setAttribute(
-        'stroke-width',
-        ((pathData.width || 3) * Math.max(scaleX, scaleY)).toString()
-      );
-      pathElement.setAttribute('fill', 'none');
-      pathElement.setAttribute('stroke-linecap', 'round');
-      pathElement.setAttribute('stroke-linejoin', 'round');
-      annotationsGroup.appendChild(pathElement);
-      addedCount++;
-    }
-  });
-
-  if (addedCount > 0) {
-    svgElement.appendChild(annotationsGroup);
-    console.log('✓ Added', addedCount, 'drawing paths to SVG');
-  }
-}
-
-/**
- * Transform SVG path coordinates by scale and offset
- * Formula: newCoord = originalCoord * scale + offset
- */
-function transformPathCoordinates(
-  pathString: string,
-  scaleX: number,
-  scaleY: number,
-  offsetX: number,
-  offsetY: number
-) {
-  // Parse and transform M (moveto) and L (lineto) commands
-  return pathString.replace(/([ML])\s*([\d.]+)\s+([\d.]+)/g, (match, command, x, y) => {
-    const newX = (parseFloat(x) * scaleX + offsetX).toFixed(2);
-    const newY = (parseFloat(y) * scaleY + offsetY).toFixed(2);
-    return `${command} ${newX} ${newY}`;
-  });
-}
-
-/**
- * Recursively inline all computed styles from source to target
- */
-function inlineAllStyles(sourceElement: Element, targetElement: Element) {
-  if (!sourceElement || !targetElement) return;
-
+/** Recursively copy computed styles from `source` into `target`. */
+function inlineAllStyles(source: Element, target: Element) {
+  if (!source || !target) return;
   try {
-    const computed = window.getComputedStyle(sourceElement);
-    const tagName = sourceElement.tagName.toLowerCase();
-
-    // For SVG elements, copy important properties
-    if (tagName === 'svg' || sourceElement.namespaceURI === 'http://www.w3.org/2000/svg') {
-      const svgProps = [
-        'fill',
-        'stroke',
-        'stroke-width',
-        'stroke-opacity',
-        'fill-opacity',
-        'opacity',
-        'font-family',
-        'font-size',
-        'font-weight',
-        'font-style',
-        'text-anchor',
-        'dominant-baseline',
-        'color',
-        'display',
-        'visibility'
-      ];
-
-      for (const prop of svgProps) {
-        const value = computed.getPropertyValue(prop);
-        if (value && value !== 'none' && value !== '') {
-          try {
-            (targetElement as HTMLElement).style.setProperty(prop, value);
-          } catch (e) {
-            // Skip
-          }
+    const cs = window.getComputedStyle(source);
+    if (source.namespaceURI === 'http://www.w3.org/2000/svg') {
+      for (const prop of [
+        'fill', 'stroke', 'stroke-width', 'stroke-opacity', 'fill-opacity', 'opacity',
+        'font-family', 'font-size', 'font-weight', 'font-style',
+        'text-anchor', 'dominant-baseline', 'color', 'display', 'visibility'
+      ]) {
+        const v = cs.getPropertyValue(prop);
+        if (v && v !== 'none') {
+          try { (target as HTMLElement).style.setProperty(prop, v); } catch (_) {}
         }
       }
-
-      // Copy presentation attributes
-      const attrs = ['fill', 'stroke', 'stroke-width', 'opacity', 'transform'];
-      for (const attr of attrs) {
-        if (sourceElement.hasAttribute(attr)) {
-          targetElement.setAttribute(attr, sourceElement.getAttribute(attr) || '');
-        }
+      for (const attr of ['fill', 'stroke', 'stroke-width', 'opacity', 'transform']) {
+        if (source.hasAttribute(attr)) target.setAttribute(attr, source.getAttribute(attr)!);
       }
     } else {
-      // For HTML elements, copy all styles
-      for (let i = 0; i < computed.length; i++) {
-        const prop = computed[i];
-        try {
-          (targetElement as HTMLElement).style.setProperty(prop, computed.getPropertyValue(prop));
-        } catch (e) {
-          // Skip
-        }
+      for (let i = 0; i < cs.length; i++) {
+        try { (target as HTMLElement).style.setProperty(cs[i], cs.getPropertyValue(cs[i])); } catch (_) {}
       }
     }
-  } catch (e) {
-    // Silently skip errors
-  }
-
-  // Recursively process children
-  const sourceChildren = Array.from(sourceElement.children || []);
-  const targetChildren = Array.from(targetElement.children || []);
-
-  for (let i = 0; i < Math.min(sourceChildren.length, targetChildren.length); i++) {
-    inlineAllStyles(sourceChildren[i], targetChildren[i]);
-  }
+  } catch (_) {}
+  const sc = Array.from(source.children);
+  const tc = Array.from(target.children);
+  for (let i = 0; i < Math.min(sc.length, tc.length); i++) inlineAllStyles(sc[i], tc[i]);
 }

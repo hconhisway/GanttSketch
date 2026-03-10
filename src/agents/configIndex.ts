@@ -68,14 +68,42 @@ function inferRelatedConcepts(entry: any) {
   if (path.includes('axis') || desc.includes('axis')) {
     concepts.push('y-axis', 'x-axis', 'scale', 'axis');
   }
+  if (path.includes('dependenc') || desc.includes('dependenc') || desc.includes('edge')) {
+    concepts.push(
+      'dependency',
+      'dependencies',
+      'edge',
+      'arrow',
+      'connection',
+      'link',
+      'flow',
+      'predecessor',
+      'successor',
+      'children',
+      'parent'
+    );
+  }
   if (path.includes('hierarchy1') || path.includes('process') || desc.includes('process')) {
     concepts.push('processes', 'pid', 'proc', 'hierarchy1', 'root');
   }
   if (path.includes('hierarchy2') || path.includes('thread') || desc.includes('thread')) {
     concepts.push('threads', 'tid', 'threading', 'hierarchy2');
   }
-  if (/hierarchy\d+/.test(path)) {
+  if (/hierarchy\d+/.test(path) || path.includes('hierarchydisplay')) {
     concepts.push('hierarchy', 'nested', 'level', 'subgroup');
+  }
+  if (path.includes('hierarchydisplay') || desc.includes('nested rectangles')) {
+    concepts.push(
+      'nested rectangles',
+      'stacked',
+      'overlapping',
+      'inline',
+      'display mode',
+      'rows'
+    );
+  }
+  if (path.includes('aggregation') || desc.includes('aggregate') || desc.includes('parent segments')) {
+    concepts.push('aggregation', 'aggregate', 'rollup', 'parent segments', 'merge gap');
   }
   if (path.includes('height') || path.includes('width')) {
     concepts.push('size', 'dimension');

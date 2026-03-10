@@ -21,6 +21,12 @@ export interface PredicateRule {
 export type RuleExpr = ExprValue;
 export type Rule = TransformRule | PredicateRule | ExprObject;
 
+export interface HierarchyAggregationRule {
+  type?: 'mergeGap';
+  mergeGapRatio?: number;
+  minGapUs?: number;
+}
+
 export interface LayoutConfig {
   margin: { top: number; right: number; bottom: number; left: number };
   headerHeight: number;
@@ -28,6 +34,8 @@ export interface LayoutConfig {
   lanePadding: number;
   expandedPadding: number;
   hierarchy2Gap: number;
+  nestedRowHeight?: number;
+  nestedLevelInset?: number;
   yAxis: {
     autoWidth: boolean;
     baseWidth: number;
@@ -42,15 +50,19 @@ export interface LayoutConfig {
 }
 
 export interface YAxisConfig {
+  hierarchyDisplayMode?: 'rows' | 'nested';
   hierarchy1OrderRule?: Rule;
   hierarchy2LaneRule?: Rule;
   hierarchy1LabelRule?: Rule;
   hierarchy2LabelRule?: Rule;
+  hierarchy1AggregationRule?: HierarchyAggregationRule;
+  hierarchy2AggregationRule?: HierarchyAggregationRule;
   hierarchyFields?: string[];
   [key: `hierarchy${number}Field`]: any;
   [key: `hierarchy${number}OrderRule`]: any;
   [key: `hierarchy${number}LaneRule`]: any;
   [key: `hierarchy${number}LabelRule`]: any;
+  [key: `hierarchy${number}AggregationRule`]: any;
   orderMode?: string;
   includeUnspecified?: boolean;
   customOrder?: string[];
@@ -96,11 +108,31 @@ export interface TooltipConfig {
 
 export type ProcessSortMode = 'default' | 'fork';
 
+export type TimeScaleMode = 'physical' | 'logarithmic' | 'fisheye' | 'logical';
+
+export interface LogarithmicTimeScaleConfig {
+  /** Controls curvature for logarithmic compression. Higher values emphasize earlier times more strongly. */
+  base?: number;
+}
+
+export interface FisheyeTimeScaleConfig {
+  /** Distortion strength for focus+context scaling. Zero disables the distortion. */
+  distortion?: number;
+  /** Fixed focus time in the current domain. Null/undefined means track pointer position. */
+  focusTime?: number | null;
+}
+
 export interface XAxisConfig {
   /** Merge gap as fraction of time window (0–1). Gaps larger than this split hierarchy1 bars. Default 0.002. */
   mergeGapRatio?: number;
   /** Time label format on the x-axis. */
   timeFormat?: 'short' | 'full';
+  /** Strategy used to map time onto the x-axis. */
+  timeScaleMode?: TimeScaleMode;
+  /** Parameters for logarithmic time compression. */
+  logarithmic?: LogarithmicTimeScaleConfig;
+  /** Parameters for fisheye focus+context distortion. */
+  fisheye?: FisheyeTimeScaleConfig;
 }
 
 export interface GanttConfig {
@@ -113,6 +145,13 @@ export interface GanttConfig {
   extensions: Record<string, any>;
   dependencies?: {
     maxEdges?: number;
+    connector?: 'line' | 'arrow';
+    amount?: 'all' | 'paths' | '1hop';
+    persistence?: 'always' | 'toggle' | 'onClick';
+    drawingStyle?: 'straight' | 'orthogonal' | 'spline' | 'bundled';
+    strokeColor?: string;
+    strokeWidth?: number;
+    arrowSize?: number;
   };
   performance?: {
     showOverlay?: boolean;

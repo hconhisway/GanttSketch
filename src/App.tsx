@@ -48,6 +48,7 @@ import type { Widget, WidgetConfig } from './types/widget';
 import type { ViewState } from './types/viewState';
 import type { SpanSoAChunkBundle } from './utils/soaBuffers';
 import { perfMetrics } from './utils/perfMetrics';
+import type { HierarchyAggregateNode } from './types/hierarchyAggregation';
 import {
   loadSessionState,
   saveSessionState,
@@ -87,9 +88,11 @@ function App() {
     filters: [],
     scrollTop: 0,
     selection: null,
+    dependenciesVisible: false,
     expandedHierarchy1Ids: [],
     lastInteractionAt: 0
   });
+  const scrollRef = useRef<HTMLDivElement>(null!);
   const chartRef = useRef<HTMLDivElement>(null!);
   const minimapRef = useRef<HTMLDivElement>(null!);
   const xAxisRef = useRef<HTMLDivElement>(null!);
@@ -125,6 +128,7 @@ function App() {
   const [viewState, setViewState] = useState<ViewState>(getInitialViewState);
   const [processAggregates, setProcessAggregates] = useState<Map<string, any[]>>(new Map());
   const [threadsByHierarchy1, setThreadsByHierarchy1] = useState<Map<string, any>>(new Map());
+  const [hierarchyTrees, setHierarchyTrees] = useState<Map<string, HierarchyAggregateNode>>(new Map());
   const [renderSoA, setRenderSoA] = useState<SpanSoAChunkBundle | null>(null);
   const [isSoaPacking, setIsSoaPacking] = useState(false);
   const [isMappingProcessing, setIsMappingProcessing] = useState(false);
@@ -187,6 +191,17 @@ function App() {
     },
     [setViewStateSafe]
   );
+
+  const handleToggleDependencies = useCallback(() => {
+    setViewStateSafe((prev) => ({
+      ...prev,
+      dependenciesVisible: !prev.dependenciesVisible,
+      lastInteractionAt: Date.now()
+    }));
+    requestAnimationFrame(() => {
+      redrawRef.current?.();
+    });
+  }, [setViewStateSafe]);
 
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -584,6 +599,20 @@ function App() {
             null,
             2
           )
+        },
+        {
+          id: `yAxis.hierarchy${level}AggregationRule`,
+          label: `Hierarchy ${level} Aggregation Rule`,
+          path: `yAxis.hierarchy${level}AggregationRule`,
+          description: 'Parent-segment aggregation rule for this hierarchy level.',
+          example: JSON.stringify(
+            {
+              type: 'mergeGap',
+              mergeGapRatio: 0.002
+            },
+            null,
+            2
+          )
         }
       );
     }
@@ -951,6 +980,12 @@ function App() {
     rawEvents && rawEvents.length > 0 && !dataMapping
   );
   const showGanttLoading = isAnalyzing || isSoaPacking || isMappingProcessing;
+  const dependencyToggleVisible = Boolean(
+    dataMapping?.features?.dependencyLines &&
+      dataMapping?.features?.dependencyField &&
+      ganttConfig?.dependencies?.persistence === 'toggle'
+  );
+  const dependencyToggleActive = Boolean(viewState.dependenciesVisible);
   const GANTT_LOADING_MIN_MS = 350;
   const ganttLoadingLabel = 'Loading...';
   const streamingEnabled = ganttConfig?.performance?.streamingEnabled === true;
@@ -1128,15 +1163,16 @@ function App() {
     startTime,
     endTime,
     mergeUtilGap,
-    hierarchy2LaneRule: ganttConfig?.yAxis?.hierarchy2LaneRule,
+    yAxisConfig: ganttConfig?.yAxis,
     setThreadsByHierarchy1,
     setProcessAggregates,
+    setHierarchyTrees,
     setExpandedHierarchy1Ids,
-    threadsByHierarchy1,
-    processAggregates
+    hierarchyTrees
   });
 
   useChartRenderer({
+    scrollRef,
     chartRef,
     minimapRef,
     xAxisRef,
@@ -1153,6 +1189,7 @@ function App() {
     obd,
     processAggregates,
     threadsByHierarchy1,
+    hierarchyTrees,
     expandedHierarchy1Ids,
     yAxisWidth,
     processSortMode,
@@ -1482,6 +1519,7 @@ function App() {
         <LeftPanel>
           <WidgetArea widgets={widgets} widgetConfig={widgetConfig} widgetAreaRef={widgetAreaRef} />
           <GanttChart
+            scrollRef={scrollRef}
             chartRef={chartRef}
             minimapRef={minimapRef}
             xAxisRef={xAxisRef}
@@ -1493,6 +1531,9 @@ function App() {
             yAxisWidth={yAxisWidth}
             isBusy={ganttLoadingVisible}
             busyLabel={ganttLoadingLabel}
+            dependencyToggleVisible={dependencyToggleVisible}
+            dependencyToggleActive={dependencyToggleActive}
+            onToggleDependencies={handleToggleDependencies}
           />
         </LeftPanel>
 

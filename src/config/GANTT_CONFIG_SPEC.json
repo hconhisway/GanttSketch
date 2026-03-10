@@ -115,6 +115,22 @@
           "default": 6
         },
         {
+          "id": "layout.nestedRowHeight",
+          "path": "layout.nestedRowHeight",
+          "kind": "value",
+          "schema": { "type": "number", "min": 20, "max": 120 },
+          "default": 36,
+          "description": "Height of the nested hierarchy display row when hierarchyDisplayMode is nested."
+        },
+        {
+          "id": "layout.nestedLevelInset",
+          "path": "layout.nestedLevelInset",
+          "kind": "value",
+          "schema": { "type": "number", "min": 1, "max": 12 },
+          "default": 3,
+          "description": "Vertical inset per hierarchy depth for nested hierarchy display."
+        },
+        {
           "id": "layout.yAxis",
           "path": "layout.yAxis",
           "kind": "value",
@@ -152,6 +168,40 @@
           "schema": { "type": "string", "enum": ["short", "full"] },
           "default": "short",
           "description": "Time label format for x-axis ticks."
+        },
+        {
+          "id": "xAxis.timeScaleMode",
+          "path": "xAxis.timeScaleMode",
+          "kind": "value",
+          "schema": {
+            "type": "string",
+            "enum": ["physical", "logarithmic", "fisheye", "logical"]
+          },
+          "default": "physical",
+          "description": "Selects the x-axis time transform used for the main chart."
+        },
+        {
+          "id": "xAxis.logarithmic.base",
+          "path": "xAxis.logarithmic.base",
+          "kind": "value",
+          "schema": { "type": "number", "min": 1.01, "max": 1000 },
+          "default": 2.718281828459045,
+          "description": "Curvature parameter for logarithmic time compression. Larger values emphasize early time ranges more strongly."
+        },
+        {
+          "id": "xAxis.fisheye.distortion",
+          "path": "xAxis.fisheye.distortion",
+          "kind": "value",
+          "schema": { "type": "number", "min": 0, "max": 10 },
+          "default": 3,
+          "description": "Distortion strength for fisheye focus+context scaling."
+        },
+        {
+          "id": "xAxis.fisheye.focusTime",
+          "path": "xAxis.fisheye.focusTime",
+          "kind": "value",
+          "schema": { "type": "number" },
+          "description": "Optional fixed fisheye focus time. When omitted, the focus follows the pointer."
         }
       ]
     },
@@ -186,6 +236,44 @@
             "type": "transform",
             "names": ["autoPack", "byField", "byLevel"]
           }
+        },
+        {
+          "id": "yAxis.hierarchyDisplayMode",
+          "path": "yAxis.hierarchyDisplayMode",
+          "kind": "value",
+          "schema": { "type": "string", "enum": ["rows", "nested"] },
+          "default": "rows",
+          "description": "How expanded hierarchies render: separate rows or vertically nested rectangles."
+        },
+        {
+          "id": "yAxis.hierarchy1AggregationRule",
+          "path": "yAxis.hierarchy1AggregationRule",
+          "kind": "value",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["mergeGap"] },
+              "mergeGapRatio": { "type": "number", "min": 0, "max": 1 },
+              "minGapUs": { "type": "number", "min": 0 }
+            }
+          },
+          "default": { "type": "mergeGap", "mergeGapRatio": 0.002 },
+          "description": "Aggregation rule for hierarchy level 1 parent segments."
+        },
+        {
+          "id": "yAxis.hierarchy2AggregationRule",
+          "path": "yAxis.hierarchy2AggregationRule",
+          "kind": "value",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["mergeGap"] },
+              "mergeGapRatio": { "type": "number", "min": 0, "max": 1 },
+              "minGapUs": { "type": "number", "min": 0 }
+            }
+          },
+          "default": { "type": "mergeGap", "mergeGapRatio": 0.002 },
+          "description": "Aggregation rule for hierarchy level 2 parent segments."
         },
         {
           "id": "yAxis.hierarchy1LabelRule",
@@ -289,6 +377,80 @@
       ]
     },
     {
+      "id": "dependencies",
+      "title": "Dependencies",
+      "description": "Dependency edge visualization between events.",
+      "entries": [
+        {
+          "id": "dependencies.connector",
+          "path": "dependencies.connector",
+          "kind": "value",
+          "schema": { "type": "string", "enum": ["line", "arrow"] },
+          "default": "arrow",
+          "description": "Connector type: plain line or arrow with arrowhead."
+        },
+        {
+          "id": "dependencies.amount",
+          "path": "dependencies.amount",
+          "kind": "value",
+          "schema": { "type": "string", "enum": ["all", "paths", "1hop"] },
+          "default": "1hop",
+          "description": "How many edges to show: all edges, transitive paths from selection, or 1-hop neighbors."
+        },
+        {
+          "id": "dependencies.persistence",
+          "path": "dependencies.persistence",
+          "kind": "value",
+          "schema": { "type": "string", "enum": ["always", "toggle", "onClick"] },
+          "default": "onClick",
+          "description": "When to show edges: always visible, toggle button, or on event click."
+        },
+        {
+          "id": "dependencies.drawingStyle",
+          "path": "dependencies.drawingStyle",
+          "kind": "value",
+          "schema": {
+            "type": "string",
+            "enum": ["straight", "orthogonal", "spline", "bundled"]
+          },
+          "default": "spline",
+          "description": "Edge drawing style: straight lines, orthogonal right-angles, smooth splines, or bundled edges."
+        },
+        {
+          "id": "dependencies.strokeColor",
+          "path": "dependencies.strokeColor",
+          "kind": "value",
+          "schema": { "type": "string" },
+          "default": "rgba(59,130,246,0.45)",
+          "description": "Stroke color used for dependency edges."
+        },
+        {
+          "id": "dependencies.strokeWidth",
+          "path": "dependencies.strokeWidth",
+          "kind": "value",
+          "schema": { "type": "number", "min": 0.5, "max": 12 },
+          "default": 1.5,
+          "description": "Stroke width in pixels used for dependency edges."
+        },
+        {
+          "id": "dependencies.arrowSize",
+          "path": "dependencies.arrowSize",
+          "kind": "value",
+          "schema": { "type": "number", "min": 2, "max": 24 },
+          "default": 6,
+          "description": "Arrowhead size in pixels when connector is set to arrow."
+        },
+        {
+          "id": "dependencies.maxEdges",
+          "path": "dependencies.maxEdges",
+          "kind": "value",
+          "schema": { "type": "number", "min": 0, "max": 5000 },
+          "default": 200,
+          "description": "Maximum number of dependency edges to render."
+        }
+      ]
+    },
+    {
       "id": "performance",
       "description": "Performance tuning and diagnostics.",
       "entries": [
@@ -335,6 +497,36 @@
           "path": "extensions",
           "kind": "value",
           "schema": { "type": "object" }
+        }
+      ]
+    },
+    {
+      "id": "auxCharts",
+      "title": "Auxiliary Charts",
+      "description": "Auxiliary overview chart (minimap) type and options.",
+      "entries": [
+        {
+          "id": "extensions.auxCharts.enabled",
+          "path": "extensions.auxCharts.enabled",
+          "kind": "value",
+          "schema": { "type": "boolean" },
+          "default": true,
+          "description": "Enable auxiliary overview chart in the top bar."
+        },
+        {
+          "id": "extensions.auxCharts.overview.kind",
+          "path": "extensions.auxCharts.overview.kind",
+          "kind": "value",
+          "schema": { "type": "string", "enum": ["utilizationArea", "utilizationCount", "stackedArea"] },
+          "default": "utilizationArea",
+          "description": "Overview chart type: utilizationArea (% per pixel), utilizationCount (active process count), or stackedArea (multiple series)."
+        },
+        {
+          "id": "extensions.auxCharts.overview",
+          "path": "extensions.auxCharts.overview",
+          "kind": "value",
+          "schema": { "type": "object", "fields": ["kind", "entityLevel", "bins", "count", "stacked"] },
+          "description": "Full overview chart config (kind, entityLevel, bins, count, stacked)."
         }
       ]
     }

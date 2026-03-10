@@ -168,6 +168,10 @@ ${configStr}
 ## Current Data Mapping (controls hierarchy/time/identity fields)
 ${mappingStr}
 
+Dependency edges are enabled by dataMapping.features.dependencyLines and sourced from
+dataMapping.features.dependencyField. Visual behavior for dependency edges lives under
+ganttConfig.dependencies.*.
+
 ## Active Config Target (optional)
 ${activeTargetStr}
 
@@ -192,10 +196,14 @@ Common transform patterns:
 - Sort by: { "type": "transform", "name": "sortBy", "params": { "key": "stats.totalDurUs", "desc": true } }
 - Auto pack: { "type": "transform", "name": "autoPack" }
 - By field (any attribute): { "type": "transform", "name": "byField", "params": { "field": "eventAttrPath" } }
+- Hierarchy display mode: { "yAxis": { "hierarchyDisplayMode": "nested" } } to show expanded hierarchies as vertically nested rectangles instead of separate rows. Use "rows" for the default row-based mode.
+- Nested hierarchy layout tuning: { "layout": { "nestedRowHeight": 36, "nestedLevelInset": 3 } } where inset applies only on the Y axis; the time axis remains faithful to the data.
+- Per-level hierarchy aggregation: { "yAxis": { "hierarchy3AggregationRule": { "type": "mergeGap", "mergeGapRatio": 0.002 } } } to control how a hierarchy level rolls child events into parent segments. In "rows" mode, expanded parents stay visible above children; in "nested" mode, the parent container stays visible and children render inside it.
 - Dynamic hierarchy paths are allowed even when not listed statically:
   - yAxis.hierarchyNField
   - yAxis.hierarchyNLabelRule
   - yAxis.hierarchyNLaneRule
+  - yAxis.hierarchyNAggregationRule
   - performance.hierarchyNLOD.pixelWindow
   - performance.hierarchyNLOD.mergeUtilGap
 
@@ -205,7 +213,7 @@ Based on the user's request, output EITHER a Gantt config patch OR a data mappin
 ### When to update Data Mapping vs Gantt Config
 - Use **update_data_mapping** when the user is changing how raw data fields map to the chart (time fields, hierarchy fields/levels, identity fields like name/category/id, etc.).
   - To add/replace hierarchy levels, update: yAxis.hierarchyFields (outermost to innermost). The app will normalize features.hierarchyLevels and features.hierarchyFields automatically.
-- Use **update_gantt_config** when the user is changing visual rules/styling (ordering rules, lane packing, label rules, tooltip formatting rules, colors, layout, performance knobs).
+- Use **update_gantt_config** when the user is changing visual rules/styling (ordering rules, lane packing, label rules, tooltip formatting rules, colors, layout, performance knobs, dependency edge display).
 
 IMPORTANT:
 1. Only modify the specific config items relevant to the request

@@ -22,6 +22,8 @@ export interface ViewState {
   filters: FilterExpr[];
   scrollTop: number;
   selection: string | null;
+  dependenciesVisible?: boolean;
+  fisheyeFocusTime?: number | null;
   expandedHierarchy1Ids: string[];
   lastInteractionAt: number;
   streamingRequest?: StreamingRequest;

@@ -1,4 +1,4 @@
-import type { GanttDataMapping } from '../types/ganttConfig';
+import type { GanttDataMapping, HierarchyAggregationRule, YAxisConfig } from '../types/ganttConfig';
 
 type MaybeString = string | null | undefined;
 export type HierarchyAliasMap = {
@@ -92,6 +92,28 @@ export function getHierarchyFieldVarName(level: number): string {
   return `hierarchy${Math.max(1, Math.floor(level))}Field`;
 }
 
+export function getHierarchyAggregationRuleKey(level: number): string {
+  return `hierarchy${Math.max(1, Math.floor(level))}AggregationRule`;
+}
+
+export function resolveHierarchyAggregationRule(
+  yAxis: Partial<YAxisConfig> | null | undefined,
+  level: number,
+  fallbackMergeGapRatio = 0.002
+): HierarchyAggregationRule {
+  const lvl = Math.max(1, Math.floor(level));
+  for (let current = lvl; current >= 1; current -= 1) {
+    const candidate = yAxis?.[getHierarchyAggregationRuleKey(current) as keyof YAxisConfig];
+    if (candidate && typeof candidate === 'object') {
+      return candidate as HierarchyAggregationRule;
+    }
+  }
+  return {
+    type: 'mergeGap',
+    mergeGapRatio: fallbackMergeGapRatio
+  };
+}
+
 export function getHierarchyLodKey(level: number): string {
   return `hierarchy${Math.max(1, Math.floor(level))}LOD`;
 }
@@ -181,7 +203,7 @@ export function pruneHierarchyConfig(config: any, levelCount: number): any {
   const yAxis = next?.yAxis;
   if (yAxis && typeof yAxis === 'object') {
     for (const key of Object.keys(yAxis)) {
-      const match = key.match(/^hierarchy(\d+)(Field|OrderRule|LaneRule|LabelRule)$/);
+      const match = key.match(/^hierarchy(\d+)(Field|OrderRule|LaneRule|LabelRule|AggregationRule)$/);
       if (!match) continue;
       const level = Number(match[1]);
       if (!Number.isFinite(level) || level <= maxLevel) continue;

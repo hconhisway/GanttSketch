@@ -2,7 +2,15 @@ import { GanttConfig } from '../types/ganttConfig';
 
 export const DEFAULT_GANTT_CONFIG: GanttConfig = {
   xAxis: {
-    timeFormat: 'short'
+    timeFormat: 'short',
+    timeScaleMode: 'physical',
+    logarithmic: {
+      base: Math.E
+    },
+    fisheye: {
+      distortion: 3,
+      focusTime: null
+    }
   },
   layout: {
     margin: { top: 24, right: 24, bottom: 24, left: 16 },
@@ -11,6 +19,8 @@ export const DEFAULT_GANTT_CONFIG: GanttConfig = {
     lanePadding: 3,
     expandedPadding: 8,
     hierarchy2Gap: 6,
+    nestedRowHeight: 36,
+    nestedLevelInset: 3,
     yAxis: {
       autoWidth: true,
       baseWidth: 180,
@@ -26,6 +36,15 @@ export const DEFAULT_GANTT_CONFIG: GanttConfig = {
     }
   },
   yAxis: {
+    hierarchyDisplayMode: 'rows',
+    hierarchy1AggregationRule: {
+      type: 'mergeGap',
+      mergeGapRatio: 0.002
+    },
+    hierarchy2AggregationRule: {
+      type: 'mergeGap',
+      mergeGapRatio: 0.002
+    },
     hierarchy1OrderRule: {
       type: 'transform',
       name: 'forkTree',
@@ -142,7 +161,14 @@ export const DEFAULT_GANTT_CONFIG: GanttConfig = {
     }
   },
   dependencies: {
-    maxEdges: 200
+    maxEdges: 200,
+    connector: 'arrow',
+    amount: '1hop',
+    persistence: 'onClick',
+    drawingStyle: 'spline',
+    strokeColor: 'rgba(59,130,246,0.45)',
+    strokeWidth: 1.5,
+    arrowSize: 6
   },
   performance: {
     showOverlay: false,
@@ -158,7 +184,23 @@ export const DEFAULT_GANTT_CONFIG: GanttConfig = {
       pixelWindow: 1
     }
   },
-  extensions: {}
+  extensions: {
+    auxCharts: {
+      enabled: true,
+      overview: {
+        kind: 'utilizationArea' as const,
+        entityLevel: 1,
+        bins: { mode: 'auto' as const, min: 300, max: 900 },
+        count: { binSize: 1 },
+        stacked: {
+          mode: 'groupBy' as const,
+          groupBy: { op: 'coalesce', args: [{ op: 'get', path: 'event.cat' }, { op: 'get', path: 'event.name' }, { op: 'var', name: 'hierarchy1' }] },
+          topK: 8,
+          includeOther: true
+        }
+      }
+    }
+  }
 };
 
 export const GANTT_CONFIG = DEFAULT_GANTT_CONFIG;
@@ -208,6 +250,13 @@ function buildDefaultHierarchyLabelRule(level: number) {
         { op: 'var', name: `hierarchy${level}` }
       ]
     }
+  };
+}
+
+function buildDefaultHierarchyAggregationRule() {
+  return {
+    type: 'mergeGap',
+    mergeGapRatio: 0.002
   };
 }
 
@@ -382,6 +431,12 @@ export function normalizeGanttConfig(raw: any): GanttConfig {
     if (y.threadLaneRule != null && y.hierarchy2LaneRule == null) y.hierarchy2LaneRule = y.threadLaneRule;
     if (y.processLabelRule != null && y.hierarchy1LabelRule == null) y.hierarchy1LabelRule = y.processLabelRule;
     if (y.threadLabelRule != null && y.hierarchy2LabelRule == null) y.hierarchy2LabelRule = y.threadLabelRule;
+    if (y.hierarchy1AggregationRule == null) {
+      y.hierarchy1AggregationRule = buildDefaultHierarchyAggregationRule();
+    }
+    if (y.hierarchy2AggregationRule == null) {
+      y.hierarchy2AggregationRule = buildDefaultHierarchyAggregationRule();
+    }
     y.hierarchy1LabelRule = normalizeHierarchy1LabelRule(y.hierarchy1LabelRule);
     if (y.hierarchy2LabelRule != null) {
       y.hierarchy2LabelRule = normalizeHierarchy2LabelRule(y.hierarchy2LabelRule);
@@ -403,6 +458,10 @@ export function normalizeGanttConfig(raw: any): GanttConfig {
       } else {
         (y as any)[labelKey] = buildDefaultHierarchyLabelRule(level);
       }
+      const aggregationKey = `hierarchy${level}AggregationRule`;
+      if ((y as any)[aggregationKey] == null) {
+        (y as any)[aggregationKey] = buildDefaultHierarchyAggregationRule();
+      }
     });
     c.yAxis = y;
   }
@@ -421,6 +480,24 @@ export function normalizeGanttConfig(raw: any): GanttConfig {
     }
     c.layout = layout;
   }
+  const defaultXAxis = DEFAULT_GANTT_CONFIG.xAxis || {};
+  const xAxis = c.xAxis && typeof c.xAxis === 'object' ? { ...c.xAxis } : {};
+  if (xAxis.timeFormat == null) xAxis.timeFormat = defaultXAxis.timeFormat ?? 'short';
+  if (xAxis.timeScaleMode == null) xAxis.timeScaleMode = defaultXAxis.timeScaleMode ?? 'physical';
+  const xAxisLog =
+    xAxis.logarithmic && typeof xAxis.logarithmic === 'object' ? { ...xAxis.logarithmic } : {};
+  if (xAxisLog.base == null) xAxisLog.base = defaultXAxis.logarithmic?.base ?? Math.E;
+  xAxis.logarithmic = xAxisLog;
+  const xAxisFisheye =
+    xAxis.fisheye && typeof xAxis.fisheye === 'object' ? { ...xAxis.fisheye } : {};
+  if (xAxisFisheye.distortion == null) {
+    xAxisFisheye.distortion = defaultXAxis.fisheye?.distortion ?? 3;
+  }
+  if (xAxisFisheye.focusTime === undefined) {
+    xAxisFisheye.focusTime = defaultXAxis.fisheye?.focusTime ?? null;
+  }
+  xAxis.fisheye = xAxisFisheye;
+  c.xAxis = xAxis;
   if (c.tooltip && typeof c.tooltip === 'object' && c.tooltip.process != null && (c.tooltip as any).hierarchy1 == null) {
     c.tooltip = { ...c.tooltip, hierarchy1: (c.tooltip as any).process };
   }
@@ -431,6 +508,26 @@ export function normalizeGanttConfig(raw: any): GanttConfig {
   if (perf.streamingBufferFactor == null) perf.streamingBufferFactor = defaultPerf.streamingBufferFactor ?? 0.5;
   if (perf.streamingSimulate == null) perf.streamingSimulate = defaultPerf.streamingSimulate ?? false;
   c.performance = perf;
+  const defaultExt = DEFAULT_GANTT_CONFIG.extensions || {};
+  const ext = c.extensions && typeof c.extensions === 'object' ? { ...c.extensions } : {};
+  if (ext.auxCharts == null) ext.auxCharts = defaultExt.auxCharts;
+  else if (typeof ext.auxCharts === 'object') {
+    const defAux = defaultExt.auxCharts;
+    if (defAux && typeof defAux === 'object') {
+      if (ext.auxCharts.enabled == null) ext.auxCharts.enabled = defAux.enabled;
+      if (ext.auxCharts.overview == null) ext.auxCharts.overview = defAux.overview;
+      else if (typeof ext.auxCharts.overview === 'object' && defAux.overview) {
+        const o = ext.auxCharts.overview as Record<string, any>;
+        const doo = defAux.overview as Record<string, any>;
+        if (o.kind == null) o.kind = doo.kind;
+        if (o.entityLevel == null) o.entityLevel = doo.entityLevel;
+        if (o.bins == null) o.bins = doo.bins;
+        if (o.count == null) o.count = doo.count;
+        if (o.stacked == null) o.stacked = doo.stacked;
+      }
+    }
+  }
+  c.extensions = ext;
   return c as GanttConfig;
 }
 
@@ -517,6 +614,22 @@ Path: patch.yAxis.hierarchy2LaneRule. Default: autoPack.
 - "autoPack": pack overlapping events into lanes (default).
 - "byField": one lane per value of any event attribute. Requires params.field (dot path into event). No fixed field names; link directly to any data attribute, e.g. params: { field: "level" }, params: { field: "args.depth" }, params: { field: "cat" }. If params.field is omitted, falls back to autoPack.
 
+## Hierarchy display mode
+Path: patch.yAxis.hierarchyDisplayMode. Default: "rows".
+- "rows": expanded hierarchies render as separate rows (current default).
+- "nested": expanded hierarchies render as vertically nested rectangles in a single detail row. Vertical inset only applies on the Y axis; the X axis remains faithful to real event times.
+
+## Hierarchy aggregation
+Path: patch.yAxis.hierarchyNAggregationRule
+- Every hierarchy level can define its own parent-segment aggregation rule.
+- Default: { "type": "mergeGap", "mergeGapRatio": 0.002 }
+- Supported fields:
+  - type: "mergeGap"
+  - mergeGapRatio: fraction of the visible time window used to merge nearby child events
+  - minGapUs: absolute minimum merge gap in microseconds
+- In "rows" mode, expanded parents stay visible as aggregate rows above their children.
+- In "nested" mode, expanded parents stay visible as aggregate containers and children render inside them.
+
 ## Labels (rules)
 Path: patch.yAxis.hierarchy1LabelRule / patch.yAxis.hierarchy2LabelRule
 
@@ -524,8 +637,27 @@ Path: patch.yAxis.hierarchy1LabelRule / patch.yAxis.hierarchy2LabelRule
 Path: patch.layout
 - margin: { top, right, bottom, left }
 - headerHeight, laneHeight, lanePadding, expandedPadding, hierarchy2Gap
+- nestedRowHeight, nestedLevelInset
 - yAxis: { autoWidth, baseWidth, minWidth, maxWidth, hierarchy1Indent, labelPadding, hierarchy1Font, hierarchy2Font }
 - label: { minBarLabelPx }
+
+## X-Axis
+Path: patch.xAxis
+- timeFormat: "short" | "full"
+- timeScaleMode: "physical" | "logarithmic" | "fisheye" | "logical"
+- logarithmic.base: number > 1; higher values compress later time more strongly
+- fisheye.distortion: number from 0 to 10; larger values magnify the focus region more
+- fisheye.focusTime: fixed focus time in the current domain; null or omitted lets the chart track the pointer
+- Logical time requires dependency data (dataMapping.features.dependencyField) and falls back to physical time when dependencies are unavailable
+
+## Dependencies
+Path: patch.dependencies
+- connector: "line" | "arrow"
+- amount: "all" | "paths" | "1hop"
+- persistence: "always" | "toggle" | "onClick"
+- drawingStyle: "straight" | "orthogonal" | "spline" | "bundled"
+- strokeColor, strokeWidth, arrowSize, maxEdges
+- Dependency sources come from dataMapping.features.dependencyField and can point at any event field such as "children", "deps", or "args.dependencies"
 
 ## Color (rules)
 Path: patch.color
@@ -681,6 +813,22 @@ Example 6: Compact layout
     }
   },
   "description": "Smaller rows and narrower y-axis"
+}
+\`\`\`
+
+Example 7: Show all dependency arrows with orthogonal routing
+\`\`\`json
+{
+  "action": "update_gantt_config",
+  "patch": {
+    "dependencies": {
+      "connector": "arrow",
+      "amount": "all",
+      "persistence": "always",
+      "drawingStyle": "orthogonal"
+    }
+  },
+  "description": "Show all dependency arrows with orthogonal routing"
 }
 \`\`\`
 

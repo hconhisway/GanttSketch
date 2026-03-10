@@ -2,9 +2,14 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as d3 from 'd3';
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
 import { GANTT_CONFIG } from '../config/ganttConfig';
-import type { GanttDataMapping, ProcessSortMode } from '../types/ganttConfig';
+import type {
+  GanttDataMapping,
+  ProcessSortMode,
+  TimeScaleMode
+} from '../types/ganttConfig';
 import type { ViewState } from '../types/viewState';
 import type { RenderPrimitive } from '../types/data';
+import type { HierarchyAggregateNode } from '../types/hierarchyAggregation';
 import type { SpanSoAChunkBundle } from '../utils/soaBuffers';
 import { buildProcessStats } from '../utils/dataProcessing';
 import { pickTextColor, resolveColor, resolveColorKey } from '../utils/color';
@@ -17,7 +22,7 @@ import {
 } from '../utils/processOrder';
 import { buildTooltipHtml } from '../utils/tooltip';
 import { clampNumber, formatTimeUs, formatTimeUsFull } from '../utils/formatting';
-import { evalExpr, getValueAtPath, hashStringToInt, isEmptyValue } from '../utils/expression';
+import { evalExpr, getValueAtPath, isEmptyValue } from '../utils/expression';
 import {
   buildHierarchyLaneKey,
   getHierarchyFieldVarName,
@@ -30,15 +35,29 @@ import { aggregateLaneEvents } from '../utils/lodAggregation';
 import { createWebGLRenderer } from '../rendering/webglRenderer';
 import { perfMetrics } from '../utils/perfMetrics';
 import { PERF_BUDGETS } from '../config/perfBudgets';
+import {
+  buildDependencyIndex,
+  buildDependencyPath,
+  getVisibleEdges
+} from '../utils/dependencyGraph';
+import {
+  computeOverviewModel,
+  drawOverviewChart,
+  resolveBinCount
+} from '../auxCharts';
+import type { OverviewModel } from '../auxCharts';
+import { computeLogicalClock } from '../scales/logicalClock';
+import { createTimeScale, type TimeScaleViewParams } from '../scales/timeScale';
 
 type ViewRange = { start: number; end: number };
-type ViewParams = { vs: number; ve: number; span: number; k: number };
+type ViewParams = TimeScaleViewParams;
 
 type ThreadLevelMap = Map<string | number, any[]>;
 type ThreadMap = Map<string, ThreadLevelMap>;
 type ThreadsByHierarchy1 = Map<string, ThreadMap>;
 
 interface UseChartRendererArgs {
+  scrollRef: RefObject<HTMLDivElement>;
   chartRef: RefObject<HTMLDivElement>;
   minimapRef: RefObject<HTMLDivElement>;
   xAxisRef: RefObject<HTMLDivElement>;
@@ -55,6 +74,7 @@ interface UseChartRendererArgs {
   obd: any;
   processAggregates: Map<string, any[]>;
   threadsByHierarchy1: ThreadsByHierarchy1;
+  hierarchyTrees: Map<string, HierarchyAggregateNode>;
   expandedHierarchy1Ids: string[];
   yAxisWidth: number;
   processSortMode: ProcessSortMode;
@@ -68,6 +88,7 @@ interface UseChartRendererArgs {
 }
 
 export function useChartRenderer({
+  scrollRef,
   chartRef,
   minimapRef,
   xAxisRef,
@@ -84,6 +105,7 @@ export function useChartRenderer({
   obd,
   processAggregates,
   threadsByHierarchy1,
+  hierarchyTrees,
   expandedHierarchy1Ids,
   yAxisWidth,
   processSortMode,
@@ -100,20 +122,17 @@ export function useChartRenderer({
     () => normalizeProcessOrderRule(ganttConfig?.yAxis || {}, processSortMode),
     [ganttConfig, processSortMode]
   );
-  const threadOrderMode = useMemo(
-    () =>
-      resolveThreadLaneMode(
-        ganttConfig?.yAxis?.hierarchy2LaneRule ?? ganttConfig?.yAxis?.threadLaneRule,
-        ganttConfig?.yAxis?.thread?.orderMode
-      ),
-    [ganttConfig]
+  const fisheyeFocusTimeRef = useRef<number | null>(null);
+  const logicalViewRangeRef = useRef<ViewRange | null>(null);
+  const warnedLogicalFallbackRef = useRef(false);
+  const dependencyField = dataMapping?.features?.dependencyField ?? null;
+  const dependencyIndex = useMemo(
+    () => buildDependencyIndex(chartData, dependencyField),
+    [chartData, dependencyField]
   );
-  const threadLaneFieldPath = useMemo(
-    () =>
-      getThreadLaneFieldPath(
-        ganttConfig?.yAxis?.hierarchy2LaneRule ?? ganttConfig?.yAxis?.threadLaneRule
-      ),
-    [ganttConfig]
+  const logicalClock = useMemo(
+    () => computeLogicalClock(chartData, dependencyIndex),
+    [chartData, dependencyIndex]
   );
   const orderResult = useMemo(() => {
     const hierarchy1Ids = Array.from(processAggregates.keys());
@@ -132,6 +151,9 @@ export function useChartRenderer({
     a.length === b.length && a.every((value, index) => value === b[index]);
 
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  const chartBlocksRef = useRef<any[]>([]);
+  const chartTeardownRef = useRef<(() => void) | null>(null);
+  const lastExpandToggleRef = useRef<{ key: string; at: number }>({ key: '', at: 0 });
 
   useEffect(() => {
     if (overlayRef.current) {
@@ -195,19 +217,25 @@ export function useChartRenderer({
 
   // Render chart with d3 (canvas + svg hybrid for scalability)
   const renderChartEffect = () => {
-    if (!chartRef.current) return;
+    if (!scrollRef.current || !chartRef.current) return;
 
-    const container = chartRef.current;
+    const container = scrollRef.current;
+    const stage = chartRef.current;
     let pixelRatio = window.devicePixelRatio || 1;
 
     const renderChart = () => {
-      container.innerHTML = '';
-      if (minimapRef.current) minimapRef.current.innerHTML = '';
-      if (xAxisRef.current) xAxisRef.current.innerHTML = '';
+      const hasExistingChart = !!stage.querySelector('.gantt-canvas');
+      if (!hasExistingChart) {
+        stage.innerHTML = '';
+        if (minimapRef.current) minimapRef.current.innerHTML = '';
+        if (xAxisRef.current) xAxisRef.current.innerHTML = '';
+      }
 
       // Handle empty data case
       if (!chartData || chartData.length === 0) {
-        container.innerHTML = `<div class="chart-empty-state">No data to display</div>`;
+        if (!hasExistingChart) {
+          stage.innerHTML = `<div class="chart-empty-state">No data to display</div>`;
+        }
         return;
       }
 
@@ -227,13 +255,16 @@ export function useChartRenderer({
       const laneHeight = layoutConfig?.laneHeight ?? 18;
       const lanePadding = layoutConfig?.lanePadding ?? 3;
       const expandedPadding = layoutConfig?.expandedPadding ?? 8;
-      const threadGap = layoutConfig?.hierarchy2Gap ?? layoutConfig?.threadGap ?? 6;
+      const nestedRowHeight = Math.max(headerHeight, Number(layoutConfig?.nestedRowHeight ?? 36));
+      const nestedLevelInset = Math.max(1, Number(layoutConfig?.nestedLevelInset ?? 3));
 
       const yAxisConfig = ganttConfig?.yAxis || {};
+      const hierarchyDisplayMode = yAxisConfig?.hierarchyDisplayMode === 'nested' ? 'nested' : 'rows';
+      const isNestedHierarchyMode = hierarchyDisplayMode === 'nested';
       const orderedHierarchy1Ids = orderResult.orderedHierarchy1Ids || [];
       const depthByHierarchy1 = orderResult.depthByHierarchy1 || new Map();
       if (orderedHierarchy1Ids.length === 0) {
-        container.innerHTML = `<div class="chart-empty-state">No processes found</div>`;
+        stage.innerHTML = `<div class="chart-empty-state">No processes found</div>`;
         return;
       }
 
@@ -277,6 +308,7 @@ export function useChartRenderer({
         }
         return vars;
       };
+      const expandedHierarchyKeySet = new Set(expandedHierarchy1Ids);
 
       const getProcessLabel = (h1Value: string, depth: number, isExpanded: boolean) => {
         const ctx = {
@@ -297,30 +329,6 @@ export function useChartRenderer({
         return `${isExpanded ? '▼' : '▶'} ${hierarchy1FieldDisplay}: ${h1Value}`;
       };
 
-      const getThreadLabel = (
-        _h1Value: string,
-        h2Value: string | number,
-        isMainThread: boolean
-      ) => {
-        const hierarchy2 = String(h2Value);
-        const nestedHierarchyValues = [String(_h1Value), ...hierarchy2.split('|').filter(Boolean)];
-        const ctx = {
-          hierarchy1: String(_h1Value),
-          hierarchy2,
-          isMainThread,
-          vars: {
-            hierarchy1: String(_h1Value),
-            hierarchy2,
-            hierarchy1Field: String(hierarchy1FieldDisplay),
-            hierarchy2Field: String(hierarchy2FieldDisplay),
-            ...buildHierarchyVars(nestedHierarchyValues),
-            isMainThread
-          }
-        };
-        const label = evalExpr(threadLabelRule, ctx);
-        if (!isEmptyValue(label)) return String(label);
-        return `${hierarchy2FieldDisplay}: ${h2Value}`;
-      };
       const getHierarchyNodeLabel = (
         h1Value: string,
         pathSegments: string[],
@@ -375,17 +383,28 @@ export function useChartRenderer({
             maxPx = Math.max(maxPx, LEFT_PAD + w + RIGHT_PAD);
           }
 
-          // Hierarchy2 labels (only for expanded blocks)
-          ctx.font = (yAxisLayout?.hierarchy2Font ?? yAxisLayout?.threadFont) || '500 11px system-ui';
-          for (const hierarchy1Id of expandedHierarchy1Ids) {
-            const threadMap = threadsByHierarchy1.get(hierarchy1Id);
-            if (!threadMap) continue;
-            const hierarchy2Ids = Array.from(threadMap.keys());
-            for (const hierarchy2Id of hierarchy2Ids) {
-              const isMainThread = String(hierarchy2Id) === String(hierarchy1Id);
-              const text = getThreadLabel(hierarchy1Id, hierarchy2Id, isMainThread);
-              const w = ctx.measureText(text).width;
-              maxPx = Math.max(maxPx, LEFT_PAD + THREAD_INDENT + w + RIGHT_PAD);
+          if (!isNestedHierarchyMode) {
+            // Expanded hierarchy labels in row mode.
+            ctx.font = (yAxisLayout?.hierarchy2Font ?? yAxisLayout?.threadFont) || '500 11px system-ui';
+            for (const hierarchy1Id of expandedHierarchyKeySet) {
+              if (String(hierarchy1Id).includes('|')) continue;
+              const tree = hierarchyTrees.get(hierarchy1Id);
+              if (!tree) continue;
+              const stack = [...tree.children].reverse();
+              while (stack.length > 0) {
+                const node = stack.pop()!;
+                const path = node.hierarchyValues.slice(1);
+                const text = getHierarchyNodeLabel(hierarchy1Id, path, false);
+                const indent = THREAD_INDENT + Math.max(0, path.length - 1) * 12;
+                const w = ctx.measureText(text).width;
+                maxPx = Math.max(maxPx, LEFT_PAD + indent + w + RIGHT_PAD);
+                const expandKey = [hierarchy1Id, ...path].join('|');
+                if (expandedHierarchyKeySet.has(expandKey)) {
+                  for (let index = node.children.length - 1; index >= 0; index -= 1) {
+                    stack.push(node.children[index]);
+                  }
+                }
+              }
             }
           }
 
@@ -502,9 +521,22 @@ export function useChartRenderer({
         }
         return undefined;
       };
-      const buildRuleLanes = (events: any[]): Array<{ laneId: string | number; events: any[] }> => {
+      const getLaneRuleForHierarchyLevel = (level: number) => {
+        for (let current = Math.max(2, Math.floor(level)); current >= 2; current -= 1) {
+          const direct = (yAxisConfig as any)?.[`hierarchy${current}LaneRule`];
+          if (direct != null) return direct;
+        }
+        return yAxisConfig?.hierarchy2LaneRule ?? yAxisConfig?.threadLaneRule;
+      };
+      const buildRuleLanes = (
+        events: any[],
+        laneRuleOverride?: any
+      ): Array<{ laneId: string | number; events: any[] }> => {
         if (!Array.isArray(events) || events.length === 0) return [];
-        if (threadOrderMode === 'auto') {
+        const laneRule = laneRuleOverride ?? getLaneRuleForHierarchyLevel(2);
+        const laneMode = resolveThreadLaneMode(laneRule, yAxisConfig?.thread?.orderMode);
+        const laneFieldPath = getThreadLaneFieldPath(laneRule);
+        if (laneMode === 'auto') {
           const autoLanes = buildAutoLanes(events);
           const out: Array<{ laneId: string | number; events: any[] }> = [];
           for (let idx = 0; idx < autoLanes.length; idx++) {
@@ -513,12 +545,12 @@ export function useChartRenderer({
           return out;
         }
         const byLevel = new Map<string | number, any[]>();
-        const useFieldLanes = threadLaneFieldPath.length > 0;
+        const useFieldLanes = laneFieldPath.length > 0;
         for (let ei = 0; ei < events.length; ei++) {
           const ev = events[ei];
           let laneId: string | number = 0;
           if (useFieldLanes) {
-            const raw = getLaneKeyValue(ev, threadLaneFieldPath);
+            const raw = getLaneKeyValue(ev, laneFieldPath);
             if (raw !== undefined && raw !== null) {
               laneId = typeof raw === 'number' && Number.isFinite(raw) ? raw : String(raw);
             } else {
@@ -557,7 +589,23 @@ export function useChartRenderer({
         fullPath: string[];
         children: Map<string, HierarchyNode>;
         events: any[];
+        aggregateSegments: any[];
         levelMap?: ThreadLevelMap;
+        kind?: 'nestedHierarchy';
+        hierarchy1?: string;
+        hierarchyValues?: string[];
+        hierarchyLabel?: string;
+        expandKey?: string;
+        expandable?: boolean;
+        expanded?: boolean;
+        representativeEvent?: any | null;
+        display?: { x1: number; x2: number; y0: number; y1: number } | null;
+        displaySegments?: Array<{ x1: number; x2: number; y0: number; y1: number; sourceIndex: number }>;
+      };
+
+      type HierarchyBuildResult = {
+        root: HierarchyNode;
+        omittedCount: number;
       };
 
       /** Max thread paths per process to avoid stack overflow; raise if you need more. */
@@ -565,145 +613,83 @@ export function useChartRenderer({
       /** Max tree nodes to process per process; raise if hierarchy is very deep. */
       const MAX_NODES_PER_HIERARCHY = 10000;
 
-      const buildLanesForHierarchy1 = (hierarchy1Id: string) => {
-        const threadMap = threadsByHierarchy1.get(hierarchy1Id);
-        if (!threadMap) return [];
+      const getSortedHierarchyChildren = (node: HierarchyNode) =>
+        Array.from(node.children.values()).sort((a, b) =>
+          String(a.segment).localeCompare(String(b.segment), undefined, { numeric: true })
+        );
+
+      const cloneHierarchyNodeFromAggregate = (node: HierarchyAggregateNode): HierarchyNode => {
+        const children = new Map<string, HierarchyNode>();
+        for (let index = 0; index < node.children.length; index += 1) {
+          const child = cloneHierarchyNodeFromAggregate(node.children[index]);
+          children.set(child.segment, child);
+        }
+        return {
+          key: node.key,
+          segment: node.segment,
+          fullPath: node.hierarchyValues.slice(1),
+          children,
+          events: Array.isArray(node.sourceEvents) ? node.sourceEvents : [],
+          aggregateSegments: Array.isArray(node.aggregateSegments) ? node.aggregateSegments : [],
+          levelMap: node.levelMap as ThreadLevelMap | undefined,
+          hierarchy1: node.hierarchy1
+        };
+      };
+
+      const buildHierarchyTreeForHierarchy1 = (
+        hierarchy1Id: string
+      ): HierarchyBuildResult | null => {
+        const aggregateTree = hierarchyTrees.get(hierarchy1Id);
+        if (!aggregateTree) return null;
+        const topNode = cloneHierarchyNodeFromAggregate(aggregateTree);
         const root: HierarchyNode = {
           key: '',
           segment: '',
           fullPath: [],
-          children: new Map<string, HierarchyNode>(),
-          events: []
+          children: topNode.children,
+          events: topNode.events,
+          aggregateSegments: topNode.aggregateSegments,
+          levelMap: topNode.levelMap,
+          hierarchy1: hierarchy1Id
         };
-        const allTidPaths = Array.from(threadMap.keys()).sort((a, b) =>
-          String(a).localeCompare(String(b), undefined, { numeric: true })
-        );
-        const tidPaths =
-          allTidPaths.length <= MAX_TID_PATHS_PER_HIERARCHY
-            ? allTidPaths
-            : allTidPaths.slice(0, MAX_TID_PATHS_PER_HIERARCHY);
-        const omittedCount = allTidPaths.length - tidPaths.length;
+        return { root, omittedCount: 0 };
+      };
 
-        // Avoid `arr.push(...bigArray)` which can throw RangeError (stack/arguments limit).
-        const appendEvents = (dst: any[], src: any[]) => {
-          for (let i = 0; i < src.length; i += 1) dst.push(src[i]);
-        };
-
-        for (let ti = 0; ti < tidPaths.length; ti++) {
-          const tidPath = tidPaths[ti];
-          const levelMap = threadMap.get(tidPath);
-          const pathEvents: any[] = [];
-          if (levelMap) {
-            for (const arr of levelMap.values()) {
-              if (!Array.isArray(arr) || arr.length === 0) continue;
-              for (const item of arr) pathEvents.push(item);
-            }
-          }
-          const segments = String(tidPath)
-            .split('|')
-            .map((v) => v.trim())
-            .filter(Boolean);
-          let current = root;
-          if (pathEvents.length > 0) appendEvents(current.events, pathEvents);
-          for (let idx = 0; idx < segments.length; idx++) {
-            const segment = segments[idx];
-            const nextPath = [...current.fullPath, segment];
-            const nextKey = nextPath.join('|');
-            let node = current.children.get(segment);
-            if (!node) {
-              node = {
-                key: nextKey,
-                segment,
-                fullPath: nextPath,
-                children: new Map<string, HierarchyNode>(),
-                events: []
-              };
-              current.children.set(segment, node);
-            }
-            if (pathEvents.length > 0) appendEvents(node.events, pathEvents);
-            if (idx === segments.length - 1) {
-              node.levelMap = levelMap;
-            }
-            current = node;
-          }
-        }
+      const buildLanesForHierarchy1 = (hierarchy1Id: string) => {
+        const built = buildHierarchyTreeForHierarchy1(hierarchy1Id);
+        if (!built) return [];
+        const { root, omittedCount } = built;
 
         const lanes: any[] = [];
-        const emitNodePackedLanes = (
-          pathSegments: string[],
-          sourceEvents: any[],
-          startFrom: number = 0
-        ) => {
-          const hierarchy2Val = pathSegments.join('|');
-          const packed = buildRuleLanes(sourceEvents);
-          const slice = packed.slice(Math.max(0, startFrom));
-          for (let i = 0; i < slice.length; i++) {
-            const { laneId, events } = slice[i];
-            const laneKey = buildHierarchyLaneKey(
-              [hierarchy1Id, ...pathSegments],
-              `__group_lane__${String(laneId)}`
-            );
-            lanes.push({
-              type: 'lane',
-              hierarchy1: hierarchy1Id,
-              hierarchy2: hierarchy2Val,
-              hierarchyPath: [...pathSegments],
-              hierarchyValues: [String(hierarchy1Id), ...pathSegments.map((segment) => String(segment))],
-              level: laneId,
-              laneKey,
-              threadLabel: '',
-              events
-            });
-          }
-        };
         const emitLeafLanes = (
-          pathSegments: string[],
-          levelMap: ThreadLevelMap | undefined,
+          node: HierarchyNode,
           rowLabel?: string
         ) => {
-          if (!levelMap) return;
+          if (!node.levelMap) return;
+          const pathSegments = node.fullPath;
+          const levelMap = node.levelMap;
           const hierarchy2Path = pathSegments.join('|');
-          if (threadOrderMode === 'auto') {
-            const allEvents: any[] = [];
-            for (const arr of levelMap.values()) {
-              if (!Array.isArray(arr) || arr.length === 0) continue;
-              for (const item of arr) allEvents.push(item);
-            }
-            const autoLanes = buildAutoLanes(allEvents);
-            for (let idx = 0; idx < autoLanes.length; idx++) {
-              const events = autoLanes[idx];
-              const laneKey = buildHierarchyLaneKey([hierarchy1Id, ...pathSegments], idx);
-              lanes.push({
-                type: 'lane',
-                hierarchy1: hierarchy1Id,
-                hierarchy2: hierarchy2Path,
-                hierarchyPath: [...pathSegments],
-                hierarchyValues: [String(hierarchy1Id), ...pathSegments.map((segment) => String(segment))],
-                level: idx,
-                laneKey,
-                threadLabel: idx === 0 ? (rowLabel ?? '') : '',
-                events
-              });
-            }
-            return;
+          const hierarchyValues = [
+            String(hierarchy1Id),
+            ...pathSegments.map((segment) => String(segment))
+          ];
+          const laneRule = getLaneRuleForHierarchyLevel(hierarchyValues.length);
+          const allEvents: any[] = [];
+          for (const arr of levelMap.values()) {
+            if (!Array.isArray(arr) || arr.length === 0) continue;
+            for (let i = 0; i < arr.length; i += 1) allEvents.push(arr[i]);
           }
-          const levels = Array.from(levelMap.keys()).sort((a, b) => {
-            const na = Number(a);
-            const nb = Number(b);
-            if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
-            return String(a).localeCompare(String(b), undefined, { numeric: true });
-          });
-          for (let idx = 0; idx < levels.length; idx++) {
-            const level = levels[idx];
-            const events = levelMap.get(level) ?? levelMap.get(String(level)) ?? [];
-            const laneKey = buildHierarchyLaneKey([hierarchy1Id, ...pathSegments], level);
+          const resolvedLanes = buildRuleLanes(allEvents, laneRule);
+          for (let idx = 0; idx < resolvedLanes.length; idx++) {
+            const { laneId, events } = resolvedLanes[idx];
+            const laneKey = buildHierarchyLaneKey([hierarchy1Id, ...pathSegments], laneId);
             lanes.push({
               type: 'lane',
               hierarchy1: hierarchy1Id,
               hierarchy2: hierarchy2Path,
               hierarchyPath: [...pathSegments],
-              hierarchyValues: [String(hierarchy1Id), ...pathSegments.map((segment) => String(segment))],
-              level,
+              hierarchyValues,
+              level: laneId,
               laneKey,
               threadLabel: idx === 0 ? (rowLabel ?? '') : '',
               events
@@ -714,60 +700,53 @@ export function useChartRenderer({
           const path = node.fullPath;
           const depth = path.length;
           const expandKey = [hierarchy1Id, ...path].join('|');
+          const hierarchyValues = [String(hierarchy1Id), ...path.map((segment) => String(segment))];
           const hasChildren = node.children.size > 0;
-          const hasLeaf = Boolean(node.levelMap);
-          const expandable = hasChildren;
-          const expanded =
-            expandedHierarchy1Ids.includes(expandKey) ||
-            (path.length === 1 && !hasChildren && hierarchyDepthCount <= 2);
-          const showLeafLanes = hasLeaf && (!hasChildren || expanded);
-          const isLeafOnly = hasLeaf && !hasChildren;
-          const packedNodeLanes = hasChildren ? buildRuleLanes(node.events) : [];
-          const collapsedGroupEvents =
-            packedNodeLanes.length > 0 ? packedNodeLanes[0].events : node.events;
-          const groupEvents = hasChildren
-            ? expanded
-              ? []
-              : collapsedGroupEvents
-            : showLeafLanes
-              ? []
-              : node.events;
-          if (!isLeafOnly) {
-            const laneKey = buildHierarchyLaneKey([hierarchy1Id, ...path], '__group__');
-            lanes.push({
-              type: 'group',
-              hierarchy1: hierarchy1Id,
-              hierarchy2: path.join('|'),
-              hierarchyPath: [...path],
-              hierarchyValues: [String(hierarchy1Id), ...path.map((segment) => String(segment))],
-              hierarchyDepth: depth,
-              expandKey,
-              expandable,
-              expanded,
-              laneKey,
-              events: groupEvents,
-              label: getHierarchyNodeLabel(hierarchy1Id, path, path.join('|') === String(hierarchy1Id))
-            });
-          }
-          if (hasChildren && !expanded && packedNodeLanes.length > 1) {
-            emitNodePackedLanes(path, node.events, 1);
-          }
-          if (showLeafLanes) {
-            const rowLabel = isLeafOnly
-              ? getHierarchyNodeLabel(hierarchy1Id, path, path.join('|') === String(hierarchy1Id))
-              : undefined;
-            emitLeafLanes(path, node.levelMap, rowLabel);
+          const hasLeaf = Boolean(node.levelMap && node.levelMap.size > 0);
+          const expandable = hasChildren || hasLeaf;
+          const expanded = expandedHierarchyKeySet.has(expandKey);
+          const hierarchyLabel = getHierarchyNodeLabel(
+            hierarchy1Id,
+            path,
+            path.join('|') === String(hierarchy1Id)
+          );
+          node.kind = 'nestedHierarchy';
+          node.hierarchy1 = hierarchy1Id;
+          node.hierarchyValues = hierarchyValues;
+          node.hierarchyLabel = hierarchyLabel;
+          node.expandKey = expandKey;
+          node.expandable = expandable;
+          node.expanded = expanded;
+          node.representativeEvent = Array.isArray(node.events) && node.events.length > 0 ? node.events[0] : null;
+          node.display = null;
+          const laneKey = buildHierarchyLaneKey([hierarchy1Id, ...path], '__group__');
+          lanes.push({
+            type: 'group',
+            hierarchy1: hierarchy1Id,
+            hierarchy2: path.join('|'),
+            hierarchyPath: [...path],
+            hierarchyValues,
+            hierarchyDepth: depth,
+            expandKey,
+            expandable,
+            expanded,
+            laneKey,
+            events: node.aggregateSegments,
+            label: hierarchyLabel
+          });
+          if (hasLeaf && !hasChildren && expanded) {
+            emitLeafLanes(node);
           }
           if (hasChildren && expanded) {
-            return Array.from(node.children.values()).sort((a, b) =>
-              String(a.segment).localeCompare(String(b.segment), undefined, { numeric: true })
-            );
+            return getSortedHierarchyChildren(node);
           }
           return [];
         };
-        const roots = Array.from(root.children.values()).sort((a, b) =>
-          String(a.segment).localeCompare(String(b.segment), undefined, { numeric: true })
-        );
+        const roots = getSortedHierarchyChildren(root);
+        if (roots.length === 0 && root.levelMap) {
+          emitLeafLanes(root);
+          return lanes;
+        }
         const stack = [...roots].reverse();
         let nodesProcessed = 0;
         while (stack.length > 0 && nodesProcessed < MAX_NODES_PER_HIERARCHY) {
@@ -792,9 +771,125 @@ export function useChartRenderer({
         return lanes;
       };
 
+      type NestedLeafLane = {
+        hierarchy1: string;
+        hierarchy2: string;
+        hierarchyPath: string[];
+        hierarchyValues: string[];
+        level: string | number;
+        laneKey: string;
+        events: any[];
+        nestedLane: any;
+      };
+
+      const getHierarchyValuesForNode = (node: HierarchyNode) => [
+        String(node.hierarchy1 ?? ''),
+        ...node.fullPath.map((segment) => String(segment ?? ''))
+      ].filter((value, index) => index === 0 || Boolean(value));
+
+      const getNestedExpandKey = (node: HierarchyNode) =>
+        [String(node.hierarchy1 ?? ''), ...node.fullPath].filter(Boolean).join('|');
+
+      const isNestedNodeExpanded = (node: HierarchyNode) => {
+        const key = getNestedExpandKey(node);
+        if (expandedHierarchyKeySet.has(key)) return true;
+        const n = Math.max(1, node.aggregateSegments?.length ?? 1);
+        for (let i = 0; i < n; i++) if (expandedHierarchyKeySet.has(`${key}|${i}`)) return true;
+        return false;
+      };
+
+      const getNestedLeafLanesForNode = (node: HierarchyNode): NestedLeafLane[] => {
+        if (!node.levelMap) return [];
+        const hierarchyValues = getHierarchyValuesForNode(node);
+        const hierarchyPath = hierarchyValues.slice(1);
+        const hierarchy2 = hierarchyPath.join('|') || hierarchyValues[0] || String(node.hierarchy1 ?? '');
+        const laneRule = getLaneRuleForHierarchyLevel(hierarchyValues.length);
+        const allEvents: any[] = [];
+        for (const arr of node.levelMap.values()) {
+          if (!Array.isArray(arr) || arr.length === 0) continue;
+          for (let i = 0; i < arr.length; i += 1) allEvents.push(arr[i]);
+        }
+        const resolvedLanes = buildRuleLanes(allEvents, laneRule);
+        return resolvedLanes.map(({ laneId, events }) => {
+          return {
+            hierarchy1: String(node.hierarchy1 ?? ''),
+            hierarchy2,
+            hierarchyPath,
+            hierarchyValues,
+            level: laneId,
+            laneKey: buildHierarchyLaneKey(hierarchyValues, laneId),
+            events,
+            nestedLane: {
+              type: 'lane',
+              hierarchy1: String(node.hierarchy1 ?? ''),
+              hierarchy2,
+              hierarchyPath,
+              hierarchyValues,
+              level: laneId,
+              laneKey: buildHierarchyLaneKey(hierarchyValues, laneId),
+              events
+            }
+          };
+        });
+      };
+
+      const nestedHeightCache = new Map<string, number>();
+      const measureNestedNodeBoxHeight = (node: HierarchyNode): number => {
+        const cacheKey = `${String(node.hierarchy1 ?? '')}|${node.fullPath.join('|')}`;
+        const cached = nestedHeightCache.get(cacheKey);
+        if (cached != null) return cached;
+
+        const hasChildren = node.children.size > 0;
+        const expanded = isNestedNodeExpanded(node);
+        const hasLeaf = Boolean(node.levelMap && node.levelMap.size > 0);
+        const showLeafLevels = hasLeaf && expanded;
+        const leafLaneCount = showLeafLevels ? getNestedLeafLanesForNode(node).length : 0;
+        const leafContentHeight = leafLaneCount > 0 ? leafLaneCount * laneHeight : 0;
+
+        let childContentHeight = 0;
+        if (hasChildren && expanded) {
+          const children = getSortedHierarchyChildren(node);
+          for (let i = 0; i < children.length; i += 1) {
+            childContentHeight += measureNestedNodeBoxHeight(children[i]) + (i < children.length - 1 ? nestedLevelInset : 0);
+          }
+        }
+
+        let innerHeight = 14; // Base header height
+        if (expanded) {
+          if (showLeafLevels) {
+            innerHeight += nestedLevelInset + leafContentHeight;
+          }
+          if (hasChildren) {
+            innerHeight += nestedLevelInset + childContentHeight;
+          }
+        } else {
+          innerHeight = Math.max(laneHeight, 14);
+        }
+
+        const boxHeight = innerHeight + nestedLevelInset * 2;
+        nestedHeightCache.set(cacheKey, boxHeight);
+        return boxHeight;
+      };
+
+      const getNestedNodeContentHeight = (node: HierarchyNode): number => {
+        const hasLeaf = Boolean(node.levelMap && node.levelMap.size > 0);
+        const hasChildren = node.children.size > 0;
+        let h = nestedLevelInset * 2;
+        if (hasLeaf) h += nestedLevelInset + getNestedLeafLanesForNode(node).length * laneHeight;
+        if (hasChildren) {
+          h += nestedLevelInset;
+          const children = getSortedHierarchyChildren(node);
+          for (let i = 0; i < children.length; i += 1) {
+            h += measureNestedNodeBoxHeight(children[i]) + (i < children.length - 1 ? nestedLevelInset : 0);
+          }
+        }
+        return h;
+      };
+
       type Block = {
         hierarchy1: string;
         expanded: boolean;
+        displayMode: 'rows' | 'nested';
         depth: number;
         indentPx: number;
         y0: number;
@@ -804,7 +899,23 @@ export function useChartRenderer({
         detailY0: number | null;
         detailY1: number | null;
         lanes: any[];
+        nestedTree: HierarchyNode | null;
+        nestedItems: any[];
+        nestedOverflowLabel: string | null;
       };
+
+      const OVERFLOW_LANE_MSG = 'Too many threads; try narrowing the time range or refresh.';
+      const makeOverflowLane = (h1: string) => ({
+        type: 'lane' as const,
+        events: [] as any[],
+        hierarchy1: h1,
+        hierarchy2: '',
+        hierarchyPath: [] as string[],
+        hierarchyValues: [String(h1)],
+        level: 0,
+        laneKey: `${h1}|__overflow__`,
+        threadLabel: OVERFLOW_LANE_MSG
+      });
 
       const blocks: Block[] = [];
       let yCursor = margin.top;
@@ -812,11 +923,12 @@ export function useChartRenderer({
       for (let hi = 0; hi < orderedHierarchy1Ids.length; hi++) {
         const hierarchy1Id = orderedHierarchy1Ids[hi];
         const depth = depthByHierarchy1.get(String(hierarchy1Id)) || 0;
-        const expanded = expandedHierarchy1Ids.includes(hierarchy1Id);
+        const expanded = expandedHierarchyKeySet.has(hierarchy1Id);
         if (!expanded) {
           blocks.push({
             hierarchy1: hierarchy1Id,
             expanded: false,
+            displayMode: hierarchyDisplayMode,
             depth,
             indentPx: 0,
             y0: yCursor,
@@ -825,9 +937,113 @@ export function useChartRenderer({
             headerY1: yCursor + headerHeight,
             detailY0: null,
             detailY1: null,
-            lanes: []
+            lanes: [],
+            nestedTree: null,
+            nestedItems: [],
+            nestedOverflowLabel: null
           });
           yCursor += headerHeight;
+          continue;
+        }
+
+        if (isNestedHierarchyMode) {
+          let nestedTree: HierarchyNode | null = null;
+          let nestedOverflowLabel: string | null = null;
+          try {
+            const built = buildHierarchyTreeForHierarchy1(hierarchy1Id);
+            nestedTree = built?.root ?? null;
+            if ((built?.omittedCount ?? 0) > 0) {
+              nestedOverflowLabel = `… and ${built!.omittedCount} more threads (first ${MAX_TID_PATHS_PER_HIERARCHY} shown; narrow time range to see all)`;
+            }
+          } catch (err: any) {
+            const isStackOverflow =
+              err instanceof RangeError ||
+              (err?.message && String(err.message).toLowerCase().includes('stack'));
+            if (isStackOverflow) {
+              nestedOverflowLabel = 'Too many threads; try narrowing the time range or refresh.';
+            } else {
+              throw err;
+            }
+          }
+          const singleLevelNested =
+            nestedTree != null && nestedTree.children.size === 0;
+          if (singleLevelNested) {
+            let lanes: any[];
+            try {
+              lanes = buildLanesForHierarchy1(hierarchy1Id);
+            } catch (err: any) {
+              const isStackOverflow =
+                err instanceof RangeError ||
+                (err?.message && String(err.message).toLowerCase().includes('stack'));
+              if (isStackOverflow) {
+                lanes = [makeOverflowLane(hierarchy1Id)];
+              } else {
+                throw err;
+              }
+            }
+            const lanesHeight = lanes.reduce((sum: number, lane: any) => sum + laneHeight, 0);
+            const blockHeight = headerHeight + expandedPadding + lanesHeight + expandedPadding;
+            const block: Block = {
+              hierarchy1: hierarchy1Id,
+              expanded: true,
+              displayMode: 'rows',
+              depth,
+              indentPx: 0,
+              y0: yCursor,
+              y1: yCursor + blockHeight,
+              headerY0: yCursor,
+              headerY1: yCursor + headerHeight,
+              detailY0: yCursor + headerHeight + expandedPadding,
+              detailY1: yCursor + blockHeight - expandedPadding,
+              lanes: [],
+              nestedTree: null,
+              nestedItems: [],
+              nestedOverflowLabel: null
+            };
+            let laneCursor = block.detailY0;
+            block.lanes = lanes.map((lane: any) => {
+              const y0 = laneCursor;
+              laneCursor += laneHeight;
+              return { ...lane, y0, y1: laneCursor };
+            });
+            blocks.push(block);
+            yCursor = block.y1;
+            continue;
+          }
+
+          let blockHeight = nestedRowHeight;
+          if (nestedTree) {
+            const segmentCount = Math.max(1, Array.isArray(nestedTree.aggregateSegments) ? nestedTree.aggregateSegments.length : 1);
+            const rootExpandKey = getNestedExpandKey(nestedTree);
+            const contentHeight = getNestedNodeContentHeight(nestedTree);
+            const rootExpandedByTopLevel = expandedHierarchyKeySet.has(rootExpandKey);
+            let maxSegH = 14;
+            for (let si = 0; si < segmentCount; si++) {
+              const segExpanded = rootExpandedByTopLevel || expandedHierarchyKeySet.has(`${rootExpandKey}|${si}`);
+              const segH = segExpanded ? 14 + contentHeight : 14;
+              if (segH > maxSegH) maxSegH = segH;
+            }
+            blockHeight = Math.max(maxSegH, nestedRowHeight);
+          }
+
+          blocks.push({
+            hierarchy1: hierarchy1Id,
+            expanded: true,
+            displayMode: 'nested',
+            depth,
+            indentPx: 0,
+            y0: yCursor,
+            y1: yCursor + blockHeight,
+            headerY0: yCursor,
+            headerY1: yCursor + Math.min(blockHeight, headerHeight),
+            detailY0: yCursor,
+            detailY1: yCursor + blockHeight,
+            lanes: [],
+            nestedTree,
+            nestedItems: [],
+            nestedOverflowLabel
+          });
+          yCursor += blockHeight + expandedPadding;
           continue;
         }
 
@@ -839,19 +1055,7 @@ export function useChartRenderer({
             err instanceof RangeError ||
             (err?.message && String(err.message).toLowerCase().includes('stack'));
           if (isStackOverflow) {
-            lanes = [
-              {
-                type: 'lane' as const,
-                events: [],
-                hierarchy1: hierarchy1Id,
-                hierarchy2: '',
-                hierarchyPath: [] as string[],
-                hierarchyValues: [String(hierarchy1Id)],
-                level: 0,
-                laneKey: `${hierarchy1Id}|__overflow__`,
-                threadLabel: 'Too many threads; try narrowing the time range or refresh.'
-              }
-            ];
+            lanes = [makeOverflowLane(hierarchy1Id)];
           } else {
             throw err;
           }
@@ -862,6 +1066,7 @@ export function useChartRenderer({
         const block: Block = {
           hierarchy1: hierarchy1Id,
           expanded: true,
+          displayMode: 'rows',
           depth,
           indentPx: 0,
           y0: yCursor,
@@ -870,7 +1075,10 @@ export function useChartRenderer({
           headerY1: yCursor + headerHeight,
           detailY0: yCursor + headerHeight + expandedPadding,
           detailY1: yCursor + blockHeight - expandedPadding,
-          lanes: []
+          lanes: [],
+          nestedTree: null,
+          nestedItems: [],
+          nestedOverflowLabel: null
         };
 
         let laneCursor = block.detailY0;
@@ -989,7 +1197,13 @@ export function useChartRenderer({
       const laneOrder = laneRows.map((row) => row.laneId);
       updateViewStateFromRender({ laneOrder });
 
-      let containerWidth = container.clientWidth || 900;
+      chartBlocksRef.current = blocks;
+      if (hasExistingChart) {
+        redrawRef.current?.();
+        return chartTeardownRef.current || (() => {});
+      }
+
+      let containerWidth = stage.clientWidth || 900;
       let innerWidth = Math.max(containerWidth - margin.left - margin.right, 320);
       const hierarchyLevels = Math.max(
         1,
@@ -1003,35 +1217,144 @@ export function useChartRenderer({
         pixelWindow: configPixelWindow
       });
 
-      container.style.position = 'relative';
-      container.style.overflowY = 'auto';
-      container.style.overflowX = 'hidden';
+      stage.style.position = 'relative';
+      stage.style.height = `${stageHeight}px`;
 
-      const fetchStart = Number(startTime);
-      const fetchEnd = Number(endTime);
-      const fetchSpan = Math.max(1, fetchEnd - fetchStart);
+      const physicalFetchStart = Number(startTime);
+      const physicalFetchEnd = Number(endTime);
+      const requestedTimeScaleMode = (ganttConfig?.xAxis?.timeScaleMode ??
+        'physical') as TimeScaleMode;
+      const logicalModeAvailable =
+        requestedTimeScaleMode === 'logical' &&
+        Boolean(dependencyField) &&
+        logicalClock.available;
+      const timeScaleMode: TimeScaleMode =
+        requestedTimeScaleMode === 'logical'
+          ? logicalModeAvailable
+            ? 'logical'
+            : 'physical'
+          : requestedTimeScaleMode;
+      if (requestedTimeScaleMode === 'logical' && !logicalModeAvailable) {
+        if (!warnedLogicalFallbackRef.current) {
+          console.warn(
+            '[GanttChart] Logical time requires dependency data. Falling back to physical time.'
+          );
+          warnedLogicalFallbackRef.current = true;
+        }
+      } else {
+        warnedLogicalFallbackRef.current = false;
+      }
+
+      const domainStart =
+        timeScaleMode === 'logical' ? logicalClock.domain[0] : physicalFetchStart;
+      const domainEnd =
+        timeScaleMode === 'logical' ? logicalClock.domain[1] : physicalFetchEnd;
+      const domainSpan = Math.max(1, domainEnd - domainStart);
+      const normalizeDisplayValue = (value: number) =>
+        timeScaleMode === 'logical' ? value : Math.round(value);
+      const normalizeDisplayRange = (range: ViewRange): ViewRange => {
+        let start = clampNumber(Number(range.start), domainStart, domainEnd);
+        let end = clampNumber(Number(range.end), domainStart, domainEnd);
+        if (timeScaleMode !== 'logical') {
+          start = Math.round(start);
+          end = Math.round(end);
+        }
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+          return { start: domainStart, end: domainEnd };
+        }
+        return { start, end };
+      };
+      const getPhysicalViewRangeForState = (displayRange: ViewRange): ViewRange => {
+        if (timeScaleMode !== 'logical') {
+          return {
+            start: Math.round(clampNumber(displayRange.start, physicalFetchStart, physicalFetchEnd)),
+            end: Math.round(clampNumber(displayRange.end, physicalFetchStart, physicalFetchEnd))
+          };
+        }
+        let start = logicalClock.mapLogicalToPhysical(displayRange.start);
+        let end = logicalClock.mapLogicalToPhysical(displayRange.end);
+        start = clampNumber(start, physicalFetchStart, physicalFetchEnd);
+        end = clampNumber(end, physicalFetchStart, physicalFetchEnd);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+          start = physicalFetchStart;
+          end = physicalFetchEnd;
+        }
+        return { start: Math.round(start), end: Math.round(end) };
+      };
+      const ensureLogicalViewRange = (): ViewRange => {
+        if (timeScaleMode !== 'logical') {
+          return { start: domainStart, end: domainEnd };
+        }
+        const current = logicalViewRangeRef.current;
+        if (current) {
+          const normalized = normalizeDisplayRange(current);
+          if (normalized.end > normalized.start) {
+            logicalViewRangeRef.current = normalized;
+            return normalized;
+          }
+        }
+        const currentPhysical = viewRangeRef.current || {
+          start: physicalFetchStart,
+          end: physicalFetchEnd
+        };
+        const mapped = normalizeDisplayRange({
+          start: normalizeDisplayValue(
+            logicalClock.mapPhysicalToLogical(Number(currentPhysical.start))
+          ),
+          end: normalizeDisplayValue(
+            logicalClock.mapPhysicalToLogical(Number(currentPhysical.end))
+          )
+        });
+        logicalViewRangeRef.current = mapped;
+        return mapped;
+      };
+      const getStoredViewRange = (): ViewRange => {
+        if (timeScaleMode === 'logical') {
+          return ensureLogicalViewRange();
+        }
+        return normalizeDisplayRange(
+          viewRangeRef.current || { start: physicalFetchStart, end: physicalFetchEnd }
+        );
+      };
+      const setStoredViewRange = (next: ViewRange) => {
+        const normalized = normalizeDisplayRange(next);
+        if (timeScaleMode === 'logical') {
+          logicalViewRangeRef.current = normalized;
+        } else {
+          viewRangeRef.current = normalized;
+        }
+        viewRangeRef.current = getPhysicalViewRangeForState(normalized);
+      };
+      let timeScale = createTimeScale({
+        mode: timeScaleMode,
+        left: margin.left,
+        width: innerWidth,
+        logarithmic: ganttConfig?.xAxis?.logarithmic,
+        fisheye: ganttConfig?.xAxis?.fisheye,
+        getFisheyeFocus: () => fisheyeFocusTimeRef.current
+      });
 
       const getViewParams = (): ViewParams => {
-        const v = viewRangeRef.current || { start: fetchStart, end: fetchEnd };
+        const v = getStoredViewRange();
         let vs = Number(v.start);
         let ve = Number(v.end);
         if (!Number.isFinite(vs) || !Number.isFinite(ve) || ve <= vs) {
-          vs = fetchStart;
-          ve = fetchEnd;
+          vs = domainStart;
+          ve = domainEnd;
         }
-        vs = clampNumber(vs, fetchStart, fetchEnd);
-        ve = clampNumber(ve, fetchStart, fetchEnd);
+        vs = clampNumber(vs, domainStart, domainEnd);
+        ve = clampNumber(ve, domainStart, domainEnd);
         if (ve <= vs) {
-          vs = fetchStart;
-          ve = fetchEnd;
+          vs = domainStart;
+          ve = domainEnd;
         }
         const span = Math.max(1, ve - vs);
         const k = innerWidth / span;
         return { vs, ve, span, k };
       };
 
-      const xOf = (t: number, p: ViewParams) => margin.left + (Number(t) - p.vs) * p.k;
-      const tOf = (x: number, p: ViewParams) => p.vs + (Number(x) - margin.left) / p.k;
+      const xOf = (t: number, p: ViewParams) => timeScale.xOf(Number(t), p);
+      const tOf = (x: number, p: ViewParams) => timeScale.tOf(Number(x), p);
 
       let stageWidth = innerWidth + margin.left + margin.right;
 
@@ -1046,7 +1369,7 @@ export function useChartRenderer({
       webglCanvas.style.left = '0';
       webglCanvas.style.top = '0';
       webglCanvas.style.pointerEvents = 'none';
-      container.appendChild(webglCanvas);
+      stage.appendChild(webglCanvas);
       const webglRenderer = createWebGLRenderer({ canvas: webglCanvas });
 
       // Canvas for labels and overlays
@@ -1060,7 +1383,7 @@ export function useChartRenderer({
       canvas.style.left = '0';
       canvas.style.top = '0';
       canvas.style.pointerEvents = 'none';
-      container.appendChild(canvas);
+      stage.appendChild(canvas);
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.scale(pixelRatio, pixelRatio);
@@ -1081,27 +1404,26 @@ export function useChartRenderer({
 
       const svgNode = svg.node();
       if (svgNode) {
-        container.appendChild(svgNode);
+        stage.appendChild(svgNode);
       }
 
       let yAxisHost: HTMLDivElement | null = yAxisRef.current;
       let yAxisGroup: d3.Selection<SVGGElement, any, null, undefined> | null = null;
       let yAxisTooltipEl: HTMLDivElement | null = null;
       let yAxisSeparatorEl: HTMLDivElement | null = null;
-      const viewportHeight = Math.max(100, container.clientHeight || 400);
       const ensureYAxis = () => {
         const host = yAxisHost || yAxisRef.current;
         if (!host || yAxisGroup) return;
         yAxisHost = host;
         host.innerHTML = '';
-        const vh = Math.max(100, container.clientHeight || 400);
+        const axisHeight = Math.max(stageHeight, 100);
         const axisSvg = d3
           .create('svg')
           .attr('class', 'gantt-yaxis-svg')
           .attr('width', Y_AXIS_WIDTH)
-          .attr('height', vh)
+          .attr('height', axisHeight)
           .style('width', `${Y_AXIS_WIDTH}px`)
-          .style('height', `${vh}px`)
+          .style('height', `${axisHeight}px`)
           .style('overflow', 'visible');
         yAxisGroup = axisSvg.append('g').attr('class', 'y-labels');
         const axisNode = axisSvg.node();
@@ -1111,15 +1433,14 @@ export function useChartRenderer({
         yAxisSeparatorEl = document.createElement('div');
         yAxisSeparatorEl.className = 'gantt-yaxis-separator';
         yAxisSeparatorEl.style.top = '0';
-        yAxisSeparatorEl.style.height = `${vh}px`;
+        yAxisSeparatorEl.style.height = `${axisHeight}px`;
         host.appendChild(yAxisSeparatorEl);
         yAxisTooltipEl = document.createElement('div');
         yAxisTooltipEl.className = 'gantt-yaxis-tooltip';
         yAxisTooltipEl.style.cssText = 'position:fixed;display:none;font-size:12px;font-weight:500;font-family:system-ui;background:#333;color:#fff;padding:6px 10px;border-radius:4px;pointer-events:none;z-index:1000;max-width:420px;white-space:normal;line-height:1.3;box-shadow:0 2px 8px rgba(0,0,0,0.2);';
         host.appendChild(yAxisTooltipEl);
         host.style.width = `${Y_AXIS_WIDTH}px`;
-        host.style.height = `${vh}px`;
-        host.style.top = `${container.offsetTop}px`;
+        host.style.height = `${axisHeight}px`;
       };
       ensureYAxis();
 
@@ -1127,7 +1448,7 @@ export function useChartRenderer({
       const tooltip = document.createElement('div');
       tooltip.className = 'gantt-tooltip';
       tooltip.style.display = 'none';
-      container.appendChild(tooltip);
+      stage.appendChild(tooltip);
 
       // SoA packing overlay
       const overlay = document.createElement('div');
@@ -1135,7 +1456,7 @@ export function useChartRenderer({
       overlay.textContent = 'Loading';
       overlay.style.cssText =
         'position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,0.7);color:#111;font-size:14px;font-weight:600;z-index:5;pointer-events:none;';
-      container.appendChild(overlay);
+      stage.appendChild(overlay);
       overlayRef.current = overlay;
 
       // Top bar: minimap + fixed x-axis (does NOT refetch; driven by viewRange)
@@ -1144,6 +1465,10 @@ export function useChartRenderer({
       let topWidth = innerWidth + margin.left + margin.right;
       const minimapHeight = Math.max(60, minimapHost ? minimapHost.clientHeight || 60 : 60);
       const axisHeight = Math.max(32, axisHost ? axisHost.clientHeight || 32 : 32);
+      const minimapTicksReserve = 18;
+      const minimapMarginTop = 4;
+      const minimapMarginBottom = minimapTicksReserve + 4;
+      const minimapAxisY = minimapHeight - minimapTicksReserve - 2;
 
       let minimapCtx: CanvasRenderingContext2D | null = null;
       let minimapWindowEl: HTMLDivElement | null = null;
@@ -1182,7 +1507,7 @@ export function useChartRenderer({
           .style('overflow', 'visible');
         minimapAxisGroup = mmAxisSvg
           .append('g')
-          .attr('transform', `translate(0, ${minimapHeight - 12})`);
+          .attr('transform', `translate(0, ${minimapAxisY})`);
         const mmAxisNode = mmAxisSvg.node();
         if (mmAxisNode) {
           minimapAxisSvgEl = mmAxisNode as SVGSVGElement;
@@ -1210,7 +1535,7 @@ export function useChartRenderer({
 
       const resizeScene = () => {
         const nextPixelRatio = window.devicePixelRatio || 1;
-        const nextContainerWidth = container.clientWidth || 900;
+        const nextContainerWidth = stage.clientWidth || 900;
         const nextInnerWidth = Math.max(nextContainerWidth - margin.left - margin.right, 320);
         if (Math.abs(nextInnerWidth - innerWidth) < 1 && Math.abs(nextPixelRatio - pixelRatio) < 0.01) {
           return;
@@ -1221,6 +1546,15 @@ export function useChartRenderer({
         innerWidth = nextInnerWidth;
         stageWidth = innerWidth + margin.left + margin.right;
         topWidth = stageWidth;
+        stage.style.height = `${stageHeight}px`;
+        timeScale = createTimeScale({
+          mode: timeScaleMode,
+          left: margin.left,
+          width: innerWidth,
+          logarithmic: ganttConfig?.xAxis?.logarithmic,
+          fisheye: ganttConfig?.xAxis?.fisheye,
+          getFisheyeFocus: () => fisheyeFocusTimeRef.current
+        });
 
         const nextHierarchyLevels = Math.max(
           1,
@@ -1278,11 +1612,6 @@ export function useChartRenderer({
         redraw();
       };
 
-      // Precompute minimap multi-lane stripes (compressed overview).
-      // We bin events into a small number of lanes based on current track order
-      // so the overview reflects the main Gantt ordering.
-      const overviewBinsCount = Math.min(900, Math.max(300, Math.floor(innerWidth)));
-      const LANE_COUNT = 6;
       const colorConfig = ganttConfig?.color || GANTT_CONFIG.color;
       const legacyColorConfig = ganttConfig?.colorMapping || GANTT_CONFIG.colorMapping;
       const defaultPalette = GANTT_CONFIG.color?.palette || [];
@@ -1293,97 +1622,105 @@ export function useChartRenderer({
             : defaultPalette;
         webglRenderer.setPalette(palette);
       }
-      const laneDiffs = Array.from({ length: LANE_COUNT }, () =>
-        new Array(overviewBinsCount + 1).fill(0)
-      );
-      const laneColorCounts = Array.from({ length: LANE_COUNT }, () => new Map());
-      const hierarchy1ToBlockIndex = new Map();
-      const totalBlocks = Math.max(1, blocks.length);
-      blocks.forEach((block: any, index: number) => {
-        hierarchy1ToBlockIndex.set(block.hierarchy1, index);
-      });
 
-      // Use raw events for richer overview (more like trace UI).
-      for (const ev of chartData) {
-        const s = Number(ev.start);
-        const e = Number(ev.end);
-        if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) continue;
-        const sNorm = (s - fetchStart) / fetchSpan;
-        const eNorm = (e - fetchStart) / fetchSpan;
-        if (eNorm <= 0 || sNorm >= 1) continue;
-        const i0 = Math.max(
-          0,
-          Math.min(overviewBinsCount - 1, Math.floor(sNorm * overviewBinsCount))
-        );
-        const i1 = Math.max(0, Math.min(overviewBinsCount, Math.ceil(eNorm * overviewBinsCount)));
-        const blockIndex = hierarchy1ToBlockIndex.get(ev.hierarchy1);
-        let lane = 0;
-        if (Number.isFinite(blockIndex)) {
-          lane = Math.floor((blockIndex / totalBlocks) * LANE_COUNT);
-        } else {
-          const laneKey = resolveColorKey(
-            ev,
-            ev.hierarchy2 ?? ev.hierarchy1 ?? '',
-            {
-              type: 'lane',
-              hierarchy1: ev.hierarchy1,
-              hierarchy2: ev.hierarchy2,
-              level: ev.level
-            },
-            colorConfig,
-            legacyColorConfig
+      const isLogicalDisplay = timeScaleMode === 'logical';
+      const logicalRangeCache = new WeakMap<object, { start: number; end: number }>();
+      const logicalEventCache = new WeakMap<object, any>();
+      const logicalLaneEventsCache = new WeakMap<object, any[]>();
+      const getPhysicalStart = (item: any) =>
+        Number(item?.physicalStart ?? item?.start ?? item?.timeStart ?? 0);
+      const getPhysicalEnd = (item: any) =>
+        Number(item?.physicalEnd ?? item?.end ?? item?.timeEnd ?? 0);
+      const mapPhysicalRangeToLogicalRange = (start: number, end: number) => {
+        let logicalStart = logicalClock.mapPhysicalToLogical(start);
+        let logicalEnd = logicalClock.mapPhysicalToLogical(end);
+        if (!Number.isFinite(logicalStart)) logicalStart = domainStart;
+        if (!Number.isFinite(logicalEnd)) logicalEnd = logicalStart + 1;
+        logicalStart = clampNumber(logicalStart, domainStart, domainEnd);
+        logicalEnd = clampNumber(logicalEnd, domainStart, domainEnd);
+        if (logicalEnd <= logicalStart) {
+          logicalEnd = Math.min(domainEnd, logicalStart + 1);
+        }
+        if (logicalEnd <= logicalStart) {
+          logicalStart = domainStart;
+          logicalEnd = domainEnd;
+        }
+        return { start: logicalStart, end: logicalEnd };
+      };
+      const getDisplayRange = (item: any) => {
+        const physicalStart = getPhysicalStart(item);
+        const physicalEnd = getPhysicalEnd(item);
+        if (!isLogicalDisplay) {
+          return { start: physicalStart, end: physicalEnd };
+        }
+        if (!item || typeof item !== 'object') {
+          return mapPhysicalRangeToLogicalRange(physicalStart, physicalEnd);
+        }
+        const cached = logicalRangeCache.get(item);
+        if (cached) return cached;
+        const itemId = String(item?.id ?? '').trim();
+        const exact = itemId ? logicalClock.eventSpanById.get(itemId) : null;
+        const range = exact
+          ? { start: exact.start, end: exact.end }
+          : mapPhysicalRangeToLogicalRange(physicalStart, physicalEnd);
+        logicalRangeCache.set(item, range);
+        return range;
+      };
+      const toDisplayEvent = (event: any) => {
+        if (!isLogicalDisplay || !event || typeof event !== 'object') return event;
+        const cached = logicalEventCache.get(event);
+        if (cached) return cached;
+        const physicalStart = getPhysicalStart(event);
+        const physicalEnd = getPhysicalEnd(event);
+        const range = getDisplayRange(event);
+        const itemId = String(event?.id ?? '').trim();
+        const exact = itemId ? logicalClock.eventSpanById.get(itemId) : null;
+        const displayEvent = {
+          ...event,
+          start: range.start,
+          end: range.end,
+          physicalStart,
+          physicalEnd,
+          logicalStart: exact?.start ?? range.start,
+          logicalEnd: exact?.end ?? range.end,
+          logicalLateness: exact?.lateness ?? 0
+        };
+        logicalEventCache.set(event, displayEvent);
+        return displayEvent;
+      };
+      const getLaneDisplayEvents = (lane: any): any[] => {
+        const laneEvents = Array.isArray(lane?.events) ? lane.events : [];
+        if (!isLogicalDisplay) return laneEvents;
+        const cached = logicalLaneEventsCache.get(lane);
+        if (cached) return cached;
+        const mapped = laneEvents
+          .map((event: any) => toDisplayEvent(event))
+          .sort(
+            (a: any, b: any) =>
+              Number(a?.start ?? 0) - Number(b?.start ?? 0) ||
+              Number(a?.end ?? 0) - Number(b?.end ?? 0)
           );
-          lane = hashStringToInt(laneKey) % LANE_COUNT;
-        }
-        lane = Math.max(0, Math.min(LANE_COUNT - 1, lane));
-        laneDiffs[lane][i0] += 1;
-        laneDiffs[lane][i1] -= 1;
+        logicalLaneEventsCache.set(lane, mapped);
+        return mapped;
+      };
+      const overviewEvents = isLogicalDisplay
+        ? chartData.map((event) => toDisplayEvent(event))
+        : chartData;
 
-        const trackKey = ev.hierarchy2 ?? ev.hierarchy1 ?? '';
-        const color = resolveColor(
-          ev,
-          trackKey,
-          {
-            type: 'lane',
-            hierarchy1: ev.hierarchy1,
-            hierarchy2: ev.hierarchy2,
-            level: ev.level
-          },
-          colorConfig,
-          defaultPalette,
-          legacyColorConfig,
-          processStats
+      // Auxiliary overview chart (minimap): compute model from config and chart data.
+      const auxCharts = ganttConfig?.extensions?.auxCharts;
+      const auxEnabled = auxCharts?.enabled !== false;
+      const overviewConfig = auxCharts?.overview;
+      const overviewBinsCount = resolveBinCount(overviewConfig, innerWidth);
+      let overviewModel: OverviewModel | null = null;
+      if (auxEnabled && overviewConfig && Array.isArray(chartData) && chartData.length > 0) {
+        overviewModel = computeOverviewModel(
+          overviewEvents,
+          domainStart,
+          domainEnd,
+          overviewConfig,
+          overviewBinsCount
         );
-        const weight = Math.max(1, i1 - i0);
-        const colorCounts = laneColorCounts[lane];
-        colorCounts.set(color, (colorCounts.get(color) || 0) + weight);
-      }
-
-      const laneColors = new Array(LANE_COUNT).fill(null);
-      for (let lane = 0; lane < LANE_COUNT; lane++) {
-        const colorCounts = laneColorCounts[lane];
-        let bestColor = null;
-        let bestScore = -1;
-        colorCounts.forEach((score, color) => {
-          if (score > bestScore) {
-            bestScore = score;
-            bestColor = color;
-          }
-        });
-        laneColors[lane] = bestColor;
-      }
-
-      const laneBins = Array.from({ length: LANE_COUNT }, () =>
-        new Array(overviewBinsCount).fill(0)
-      );
-      const laneMax = new Array(LANE_COUNT).fill(0);
-      for (let lane = 0; lane < LANE_COUNT; lane++) {
-        let acc = 0;
-        for (let i = 0; i < overviewBinsCount; i++) {
-          acc += laneDiffs[lane][i];
-          laneBins[lane][i] = acc;
-          laneMax[lane] = Math.max(laneMax[lane], acc);
-        }
       }
 
       const colorFor = (item: any, trackKey: string, trackMeta: any) =>
@@ -1396,6 +1733,55 @@ export function useChartRenderer({
           legacyColorConfig,
           processStats
         );
+      const parseCssColor = (color: unknown): { r: number; g: number; b: number; a: number } | null => {
+        if (typeof color !== 'string') return null;
+        const value = color.trim();
+        if (!value) return null;
+        if (value.startsWith('#')) {
+          const hex = value.slice(1);
+          const full =
+            hex.length === 3
+              ? hex
+                  .split('')
+                  .map((ch) => ch + ch)
+                  .join('')
+              : hex;
+          if (full.length !== 6) return null;
+          const r = parseInt(full.slice(0, 2), 16);
+          const g = parseInt(full.slice(2, 4), 16);
+          const b = parseInt(full.slice(4, 6), 16);
+          if (![r, g, b].every(Number.isFinite)) return null;
+          return { r, g, b, a: 1 };
+        }
+        const rgbaMatch = value.match(
+          /^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*([0-9.]+))?\s*\)$/i
+        );
+        if (!rgbaMatch) return null;
+        const r = Number(rgbaMatch[1]);
+        const g = Number(rgbaMatch[2]);
+        const b = Number(rgbaMatch[3]);
+        const a = rgbaMatch[4] == null ? 1 : Number(rgbaMatch[4]);
+        if (![r, g, b, a].every(Number.isFinite)) return null;
+        return { r, g, b, a };
+      };
+      const haveSameOpaqueColor = (left: unknown, right: unknown) => {
+        const leftParsed = parseCssColor(left);
+        const rightParsed = parseCssColor(right);
+        if (!leftParsed || !rightParsed) {
+          return String(left ?? '').trim().toLowerCase() === String(right ?? '').trim().toLowerCase();
+        }
+        return (
+          leftParsed.r === rightParsed.r &&
+          leftParsed.g === rightParsed.g &&
+          leftParsed.b === rightParsed.b
+        );
+      };
+      const withScaledOpacity = (color: unknown, scale: number) => {
+        const parsed = parseCssColor(color);
+        if (!parsed) return typeof color === 'string' ? color : '#999999';
+        const alpha = Math.max(0, Math.min(1, parsed.a * scale));
+        return `rgba(${parsed.r}, ${parsed.g}, ${parsed.b}, ${alpha})`;
+      };
 
       const visibleState: {
         startIndex: number;
@@ -1430,7 +1816,11 @@ export function useChartRenderer({
         trackMeta: any,
         p: ViewParams
       ): RenderPrimitive[] => {
-        const laneEvents = Array.isArray(lane?.events) ? lane.events : [];
+        const laneEvents = getLaneDisplayEvents(lane);
+        if (isLogicalDisplay) {
+          lane.renderEvents = laneEvents;
+          return laneEvents;
+        }
         const pixelWindow = Math.max(1, Number(viewStateRef.current?.pixelWindow ?? 1));
         const viewportPxWidth =
           Number(viewStateRef.current?.viewportPxWidth) || Math.round(innerWidth * pixelRatio);
@@ -1466,8 +1856,8 @@ export function useChartRenderer({
           : '';
         const avgDuration = Number(item?.attrSummary?.avgDuration ?? 0);
         const count = Number(item?.count ?? 0);
-        const startUs = Number(item?.start ?? 0);
-        const endUs = Number(item?.end ?? 0);
+        const startUs = getPhysicalStart(item);
+        const endUs = getPhysicalEnd(item);
         return `
           <div class="tooltip-grid">
             <div class="tooltip-col">
@@ -1493,7 +1883,574 @@ export function useChartRenderer({
         `;
       };
 
+      const buildAggregateSegmentTooltipHtml = (item: any) => {
+        const hierarchyValues = Array.isArray(item?.hierarchyValues) ? item.hierarchyValues : [];
+        const title = hierarchyValues.slice(-1)[0] || hierarchyValues[0] || 'Aggregate';
+        const startUs = Number(getPhysicalStart(item) ?? 0);
+        const endUs = Number(getPhysicalEnd(item) ?? 0);
+        const durationUs =
+          Number.isFinite(startUs) && Number.isFinite(endUs) ? Math.max(0, endUs - startUs) : 0;
+        return `
+          <div class="tooltip-grid">
+            <div class="tooltip-col">
+              <div class="tooltip-title">${title}</div>
+              <div class="tooltip-row">
+                <span class="tooltip-key">Count:</span>
+                <span class="tooltip-value">${Number(item?.count ?? 0)}</span>
+              </div>
+              <div class="tooltip-row">
+                <span class="tooltip-key">Range:</span>
+                <span class="tooltip-value">${formatTimeUs(startUs)} → ${formatTimeUs(endUs)}</span>
+              </div>
+              <div class="tooltip-row">
+                <span class="tooltip-key">Duration:</span>
+                <span class="tooltip-value">${formatTimeUs(durationUs)}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      };
+
+      const getHierarchyNodeDisplayExtent = (node: HierarchyNode) => {
+        const events = Array.isArray(node?.aggregateSegments) ? node.aggregateSegments : [];
+        let start = Number.POSITIVE_INFINITY;
+        let end = Number.NEGATIVE_INFINITY;
+        let representativeEvent: any = node?.representativeEvent ?? null;
+        for (let i = 0; i < events.length; i += 1) {
+          const event = events[i];
+          const range = getDisplayRange(event);
+          const eventStart = Number(range?.start);
+          const eventEnd = Number(range?.end);
+          if (!Number.isFinite(eventStart) || !Number.isFinite(eventEnd)) continue;
+          if (eventStart < start) {
+            start = eventStart;
+            representativeEvent = event;
+          }
+          if (eventEnd > end) end = eventEnd;
+        }
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+        return { start, end, representativeEvent };
+      };
+
+      const getHierarchyNodePhysicalExtent = (node: HierarchyNode) => {
+        const events = Array.isArray(node?.events) ? node.events : [];
+        let start = Number.POSITIVE_INFINITY;
+        let end = Number.NEGATIVE_INFINITY;
+        for (let i = 0; i < events.length; i += 1) {
+          const event = events[i];
+          const eventStart = Number(getPhysicalStart(event));
+          const eventEnd = Number(getPhysicalEnd(event));
+          if (!Number.isFinite(eventStart) || !Number.isFinite(eventEnd)) continue;
+          if (eventStart < start) start = eventStart;
+          if (eventEnd > end) end = eventEnd;
+        }
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+        return { start, end };
+      };
+
+      const buildNestedTooltipHtml = (node: HierarchyNode) => {
+        const hierarchyValues = Array.isArray(node?.hierarchyValues) ? node.hierarchyValues : [];
+        const title = node?.hierarchyLabel || hierarchyValues.slice(-1)[0] || 'Hierarchy';
+        const pathText =
+          hierarchyValues.length > 1 ? hierarchyValues.slice(1).join(' > ') : hierarchyValues[0] || 'n/a';
+        const physicalExtent = getHierarchyNodePhysicalExtent(node);
+        const startUs = physicalExtent?.start ?? 0;
+        const endUs = physicalExtent?.end ?? 0;
+        const durationUs =
+          physicalExtent && Number.isFinite(startUs) && Number.isFinite(endUs)
+            ? Math.max(0, endUs - startUs)
+            : 0;
+        const childCount = node?.children?.size ?? 0;
+        const eventCount = Array.isArray(node?.events) ? node.events.length : 0;
+        const stateLabel = node?.expandable ? (node?.expanded ? 'Expanded' : 'Collapsed') : 'Leaf';
+        return `
+          <div class="tooltip-grid">
+            <div class="tooltip-col">
+              <div class="tooltip-title">${title}</div>
+              <div class="tooltip-row">
+                <span class="tooltip-key">Path:</span>
+                <span class="tooltip-value">${pathText || 'n/a'}</span>
+              </div>
+              <div class="tooltip-row">
+                <span class="tooltip-key">State:</span>
+                <span class="tooltip-value">${stateLabel}</span>
+              </div>
+              <div class="tooltip-row">
+                <span class="tooltip-key">Children:</span>
+                <span class="tooltip-value">${childCount}</span>
+              </div>
+              <div class="tooltip-row">
+                <span class="tooltip-key">Events:</span>
+                <span class="tooltip-value">${eventCount}</span>
+              </div>
+              <div class="tooltip-row">
+                <span class="tooltip-key">Range:</span>
+                <span class="tooltip-value">${formatTimeUs(startUs)} → ${formatTimeUs(endUs)}</span>
+              </div>
+              <div class="tooltip-row">
+                <span class="tooltip-key">Duration:</span>
+                <span class="tooltip-value">${formatTimeUs(durationUs)}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      };
+
+      const drawNestedBlock = (
+        block: Block,
+        p: ViewParams,
+        lanePositions: Map<string, { y: number; h: number }>
+      ) => {
+        if (!block.nestedTree || block.detailY0 == null || block.detailY1 == null) return;
+        block.nestedItems = [];
+
+        const chartLeft = margin.left;
+        const chartRight = margin.left + innerWidth;
+        let contentX1 = chartLeft;
+        let contentX2 = chartRight;
+        const merged = processAggregates.get(block.hierarchy1) || [];
+        let leftmostPx = Infinity;
+        let rightmostPx = -Infinity;
+        for (let i = 0; i < merged.length; i++) {
+          const displayRange = getDisplayRange(merged[i]);
+          const x1Raw = xOf(displayRange.start, p);
+          const x2Raw = xOf(displayRange.end, p);
+          if (x2Raw < chartLeft || x1Raw > chartRight || x2Raw - x1Raw < 0.5) continue;
+          const x1 = Math.floor(x1Raw);
+          const endPx = Math.max(x1 + 1, Math.ceil(x2Raw));
+          if (x1 < leftmostPx) leftmostPx = x1;
+          if (endPx > rightmostPx) rightmostPx = endPx;
+        }
+        if (Number.isFinite(leftmostPx) && rightmostPx > leftmostPx) {
+          contentX1 = Math.max(chartLeft, leftmostPx);
+          contentX2 = Math.min(chartRight, rightmostPx);
+        }
+        if (contentX2 - contentX1 < 2) {
+          const re = getHierarchyNodeDisplayExtent(block.nestedTree);
+          if (re) {
+            const x1R = xOf(re.start, p), x2R = xOf(re.end, p);
+            contentX1 = Math.max(chartLeft, Math.min(x1R, x2R));
+            contentX2 = Math.min(chartRight, Math.max(x1R, x2R));
+          }
+          if (contentX2 - contentX1 < 2) { contentX1 = chartLeft; contentX2 = chartRight; }
+        }
+        const parentDisplay = {
+          x1: Math.floor(contentX1),
+          x2: Math.max(Math.ceil(contentX2), Math.floor(contentX1) + 1),
+          y0: block.detailY0,
+          y1: block.detailY1
+        };
+
+        const wi = 2, wx = parentDisplay.x1 + wi, wy = parentDisplay.y0 + wi;
+        const ww = Math.max(0, parentDisplay.x2 - parentDisplay.x1 - 2 * wi);
+        const wh = Math.max(0, parentDisplay.y1 - parentDisplay.y0 - 2 * wi);
+        const procMeta = { type: 'process' as const, hierarchy1: block.hierarchy1, hierarchyValues: [String(block.hierarchy1)] };
+        const wrapColor = merged.length ? colorFor(merged[0], `proc-${block.hierarchy1}`, procMeta) : 'rgba(0,0,0,0.03)';
+        ctx.save();
+        ctx.fillStyle = wrapColor;
+        ctx.fillRect(wx, wy, ww, wh);
+        ctx.strokeStyle = 'rgba(17,24,39,0.08)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(wx + 0.5, wy + 0.5, ww - 1, wh - 1);
+        ctx.font = '11px system-ui';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = pickTextColor(wrapColor);
+        ctx.fillText(`− ${hierarchy1FieldDisplay}: ${block.hierarchy1}`, wx + 8, wy + 10);
+        ctx.restore();
+
+        const drawNestedLeafLevels = (node: HierarchyNode, hierarchyLabel: string, overrideY0?: number, overrideHeight?: number) => {
+          if (!node.display) return;
+          const clipSegments =
+            Array.isArray(node.displaySegments) && node.displaySegments.length > 0
+              ? node.displaySegments
+              : [node.display];
+          const leafLanes = getNestedLeafLanesForNode(node);
+          if (leafLanes.length === 0) return;
+
+          const contentY0 = overrideY0 ?? (node.display.y0 + 14); // 14 is base header height
+          const contentHeight = overrideHeight ?? (node.display.y1 - contentY0 - nestedLevelInset);
+          const contentY1 = contentY0 + contentHeight;
+          if (contentHeight < 2) return;
+
+          const laneSlotHeight = contentHeight / Math.max(leafLanes.length, 1);
+          for (let laneIndex = 0; laneIndex < leafLanes.length; laneIndex += 1) {
+            const leafLane = leafLanes[laneIndex];
+            const laneY0 = contentY0 + laneIndex * laneSlotHeight;
+            const laneY1 =
+              laneIndex === leafLanes.length - 1
+                ? contentY1
+                : contentY0 + (laneIndex + 1) * laneSlotHeight;
+            const laneH = laneY1 - laneY0;
+            if (laneH < 2) continue;
+
+            const barY = laneY0 + Math.min(1, lanePadding);
+            const barH = Math.max(2, laneH - Math.min(2, lanePadding * 2));
+            lanePositions.set(leafLane.laneKey, { y: barY, h: barH });
+
+            const trackMeta = {
+              type: 'lane',
+              hierarchy1: leafLane.hierarchy1,
+              hierarchy2: leafLane.hierarchy2,
+              hierarchyPath: leafLane.hierarchyPath,
+              hierarchyValues: leafLane.hierarchyValues,
+              level: leafLane.level
+            };
+            const renderEvents = getLaneRenderEvents(
+              leafLane.nestedLane,
+              leafLane.laneKey,
+              leafLane.hierarchy2,
+              trackMeta,
+              p
+            );
+
+            let coveredEnd = -Infinity;
+            for (let eventIndex = 0; eventIndex < renderEvents.length; eventIndex += 1) {
+              const ev = renderEvents[eventIndex];
+              const displayRange = getDisplayRange(ev);
+              const x1Raw = xOf(displayRange.start, p);
+              const x2Raw = xOf(displayRange.end, p);
+              const itemSegments: Array<{ x1: number; x2: number; y0: number; y1: number }> = [];
+              const barColor = colorFor(ev, leafLane.hierarchy2, trackMeta);
+              for (let segmentIndex = 0; segmentIndex < clipSegments.length; segmentIndex += 1) {
+                const clip = clipSegments[segmentIndex];
+                const drawLeft = Math.max(clip.x1, Math.min(x1Raw, x2Raw));
+                const drawRight = Math.min(clip.x2, Math.max(x1Raw, x2Raw));
+                if (
+                  !Number.isFinite(drawLeft) ||
+                  !Number.isFinite(drawRight) ||
+                  drawRight < drawLeft
+                ) {
+                  continue;
+                }
+
+                const x1 = Math.floor(drawLeft);
+                const endPx = Math.max(x1 + 1, Math.ceil(drawRight));
+                const drawX = Math.max(x1, coveredEnd);
+                if (drawX >= endPx) continue;
+
+                ctx.fillStyle = barColor;
+                ctx.fillRect(drawX, barY, endPx - drawX, barH);
+                itemSegments.push({ x1: drawX, x2: endPx, y0: barY, y1: barY + barH });
+                coveredEnd = endPx;
+              }
+
+              if (itemSegments.length === 0) continue;
+              const labelTarget = itemSegments.reduce((best, segment) =>
+                segment.x2 - segment.x1 > best.x2 - best.x1 ? segment : best
+              );
+
+              if (ev?.kind === 'summary') {
+                const label = `${ev.count ?? 0}`;
+                if (labelTarget.x2 - labelTarget.x1 >= 22 && barH >= 10) {
+                  ctx.save();
+                  ctx.font = '10px system-ui';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                  ctx.fillText(label, labelTarget.x1 + 4, barY + barH / 2);
+                  ctx.restore();
+                }
+              } else {
+                const label = (ev?.name || ev?.label || hierarchyLabel || '').toString();
+                const minLabelPx = layoutConfig?.label?.minBarLabelPx ?? 90;
+                if (label && labelTarget.x2 - labelTarget.x1 >= minLabelPx && barH >= 10) {
+                  ctx.save();
+                  ctx.beginPath();
+                  ctx.rect(labelTarget.x1, barY, labelTarget.x2 - labelTarget.x1, barH);
+                  ctx.clip();
+                  ctx.font = '11px system-ui';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillStyle = pickTextColor(barColor);
+                  ctx.fillText(label, labelTarget.x1 + 4, barY + barH / 2);
+                  ctx.restore();
+                }
+              }
+
+              block.nestedItems.push({
+                ...ev,
+                kind: ev?.kind === 'summary' ? 'summary' : 'nestedEvent',
+                hierarchy1: leafLane.hierarchy1,
+                hierarchy2: leafLane.hierarchy2,
+                hierarchyPath: leafLane.hierarchyPath,
+                hierarchyValues: leafLane.hierarchyValues,
+                level: leafLane.level,
+                laneKey: leafLane.laneKey,
+                nestedLane: leafLane.nestedLane,
+                display: itemSegments[0],
+                displaySegments: itemSegments
+              });
+            }
+          }
+        };
+
+          const layoutDisplayWithinParent = (
+          node: HierarchyNode,
+          parentDisplay: { x1: number; x2: number; y0: number; y1: number }
+        ) => {
+          const extent = getHierarchyNodeDisplayExtent(node);
+          if (!extent) return null;
+          const x1Raw = xOf(extent.start, p);
+          const x2Raw = xOf(extent.end, p);
+          
+          // Use parent display directly for clamping to avoid inset shrinking the visual extent incorrectly
+          const drawLeft = Math.max(parentDisplay.x1, Math.min(x1Raw, x2Raw));
+          const drawRight = Math.min(parentDisplay.x2, Math.max(x1Raw, x2Raw));
+          
+          if (drawRight < drawLeft) return null;
+          const px1 = Math.floor(drawLeft);
+          const px2 = Math.max(px1 + 1, Math.ceil(drawRight));
+
+          const y0 = parentDisplay.y0;
+          const y1 = parentDisplay.y1;
+          const barH = y1 - y0;
+          if (barH < 2) return null;
+
+          const displaySegments = (Array.isArray(node.aggregateSegments) ? node.aggregateSegments : [])
+            .map((segment, sourceIndex) => {
+              const sx1Raw = xOf(Number(segment?.start ?? 0), p);
+              const sx2Raw = xOf(Number(segment?.end ?? 0), p);
+              const sDrawLeft = Math.max(px1, Math.min(sx1Raw, sx2Raw));
+              const sDrawRight = Math.min(px2, Math.max(sx1Raw, sx2Raw));
+              if (
+                !Number.isFinite(sDrawLeft) ||
+                !Number.isFinite(sDrawRight) ||
+                sDrawRight < sDrawLeft
+              ) {
+                return null;
+              }
+              const sx1 = Math.floor(sDrawLeft);
+              const sx2 = Math.max(sx1 + 1, Math.ceil(sDrawRight));
+              return { x1: sx1, x2: sx2, y0, y1, sourceIndex };
+            })
+            .filter(Boolean) as Array<{ x1: number; x2: number; y0: number; y1: number; sourceIndex: number }>;
+
+          if (displaySegments.length === 0) {
+            return null;
+          }
+          const finalX1 = Math.min(...displaySegments.map((segment) => segment.x1));
+          const finalX2 = Math.max(...displaySegments.map((segment) => segment.x2));
+          return { display: { x1: finalX1, x2: finalX2, y0, y1 }, displaySegments };
+        };
+
+        const drawHierarchyNodeFrame = (
+          node: HierarchyNode,
+          display: { x1: number; x2: number; y0: number; y1: number },
+          displaySegments: Array<{ x1: number; x2: number; y0: number; y1: number; sourceIndex: number }>,
+          fillColor: string,
+          textColorSource: string,
+          hierarchyLabel: string,
+          hasChildren: boolean,
+          expandable: boolean,
+          showLeafLevels: boolean,
+          getSegmentExpanded: (segIdx: number) => boolean
+        ) => {
+          const barH = display.y1 - display.y0;
+          ctx.save();
+          ctx.fillStyle = fillColor;
+          displaySegments.forEach((segment) => {
+            ctx.fillRect(segment.x1, segment.y0, segment.x2 - segment.x1, barH);
+          });
+          ctx.restore();
+
+          const strokeStyle = 'rgba(17, 24, 39, 0.18)';
+          ctx.strokeStyle = strokeStyle;
+          ctx.lineWidth = 1;
+          displaySegments.forEach((segment) => {
+            ctx.strokeRect(
+              segment.x1 + 0.5,
+              segment.y0 + 0.5,
+              Math.max(0, segment.x2 - segment.x1 - 1),
+              Math.max(0, barH - 1)
+            );
+          });
+
+          const labelOffset = expandable ? 14 : 4;
+          const labelMinPx = layoutConfig?.label?.minBarLabelPx ?? 90;
+          const textColor = pickTextColor(textColorSource);
+
+          if (barH >= 10) {
+          displaySegments.forEach((segment, segIdx) => {
+            const segmentWidth = segment.x2 - segment.x1;
+            const segExpanded = getSegmentExpanded(segment.sourceIndex ?? segIdx);
+            const headerHeight = segExpanded ? 14 : Math.max(14, barH);
+            const textY = display.y0 + headerHeight / 2;
+
+            if (expandable && segmentWidth >= 14) {
+              ctx.save();
+              ctx.font = '10px system-ui';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = textColor;
+              ctx.fillText(segExpanded ? '−' : '+', segment.x1 + 4, textY);
+              ctx.restore();
+            }
+
+            if (hierarchyLabel && segmentWidth >= Math.max(labelMinPx, labelOffset + 20)) {
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(segment.x1, display.y0, segmentWidth, headerHeight);
+              ctx.clip();
+              ctx.font = '11px system-ui';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = textColor;
+              ctx.fillText(hierarchyLabel, segment.x1 + labelOffset, textY);
+              ctx.restore();
+            }
+          });
+          }
+        };
+
+        const drawNode = (
+          node: HierarchyNode,
+          parentDisplay: { x1: number; x2: number; y0: number; y1: number }
+        ) => {
+          const extent = getHierarchyNodeDisplayExtent(node);
+          if (!extent) {
+            node.display = null;
+            node.displaySegments = [];
+            return;
+          }
+
+          const hierarchyValues = getHierarchyValuesForNode(node);
+          const expandKey = getNestedExpandKey(node);
+          const hasChildren = node.children.size > 0;
+          const hasLeaf = Boolean(node.levelMap && node.levelMap.size > 0);
+          const expandable = hasChildren || hasLeaf;
+          const expanded = isNestedNodeExpanded(node);
+          const showLeafLevels = hasLeaf && expanded;
+          const layout = layoutDisplayWithinParent(node, parentDisplay);
+          if (!layout) {
+            node.display = null;
+            node.displaySegments = [];
+            return;
+          }
+          const { display, displaySegments } = layout;
+
+          const hierarchyLabel = getHierarchyNodeLabel(
+            block.hierarchy1,
+            node.fullPath,
+            node.fullPath.join('|') === String(block.hierarchy1)
+          );
+          const trackKey = hierarchyValues.slice(1).join('|') || hierarchyValues[0];
+          const trackMeta = {
+            type: 'group',
+            hierarchy1: block.hierarchy1,
+            hierarchy2: trackKey,
+            hierarchyPath: hierarchyValues.slice(1),
+            hierarchyValues,
+            level: 0
+          };
+          const representativeEvent = extent.representativeEvent ?? node.representativeEvent ?? node.events[0];
+          const getNodeBarColor = (targetNode: HierarchyNode) => {
+            const targetHierarchyValues = getHierarchyValuesForNode(targetNode);
+            const targetTrackKey =
+              targetHierarchyValues.slice(1).join('|') || targetHierarchyValues[0];
+            const targetTrackMeta = {
+              type: 'group',
+              hierarchy1: block.hierarchy1,
+              hierarchy2: targetTrackKey,
+              hierarchyPath: targetHierarchyValues.slice(1),
+              hierarchyValues: targetHierarchyValues,
+              level: 0
+            };
+            const targetExtent = getHierarchyNodeDisplayExtent(targetNode);
+            const targetRepresentativeEvent =
+              targetExtent?.representativeEvent ?? targetNode.representativeEvent ?? targetNode.events[0];
+            return colorFor(
+              targetRepresentativeEvent ?? { hierarchy1: block.hierarchy1, hierarchy2: targetTrackKey },
+              targetTrackKey,
+              targetTrackMeta
+            );
+          };
+          const barColor = getNodeBarColor(node);
+          const shouldFadeParent = getSortedHierarchyChildren(node).some((child) =>
+            haveSameOpaqueColor(barColor, getNodeBarColor(child))
+          );
+          const parentFillColor = shouldFadeParent ? withScaledOpacity(barColor, 0.7) : barColor;
+
+          node.kind = 'nestedHierarchy';
+          node.hierarchy1 = block.hierarchy1;
+          node.hierarchyValues = hierarchyValues;
+          node.hierarchyLabel = hierarchyLabel;
+          node.expandKey = expandKey;
+          node.expandable = expandable;
+          node.expanded = expanded;
+          node.representativeEvent = representativeEvent ?? null;
+          node.display = display;
+          node.displaySegments = displaySegments;
+
+          const getSegmentExpanded = (segIdx: number) =>
+            expandedHierarchyKeySet.has(`${expandKey}|${segIdx}`);
+          const isBlockRoot = node === block.nestedTree;
+          if (!isBlockRoot) {
+            drawHierarchyNodeFrame(
+              node,
+              display,
+              displaySegments,
+              parentFillColor,
+              barColor,
+              hierarchyLabel,
+              hasChildren,
+              expandable,
+              showLeafLevels,
+              getSegmentExpanded
+            );
+            block.nestedItems.push(node);
+          }
+
+          const rootExpandedByTopLevel = isBlockRoot && expandedHierarchyKeySet.has(expandKey);
+          const expandedSegments = rootExpandedByTopLevel
+            ? [{ x1: display.x1, x2: display.x2, y0: display.y0, y1: display.y1, sourceIndex: 0 }]
+            : displaySegments.filter((segment, i) =>
+                expandedHierarchyKeySet.has(`${expandKey}|${segment.sourceIndex ?? i}`)
+              );
+          const leafLanes = showLeafLevels ? getNestedLeafLanesForNode(node) : [];
+          const leafContentHeight = leafLanes.length > 0 ? leafLanes.length * laneHeight : 0;
+
+          for (const seg of expandedSegments) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(seg.x1, display.y0 + 14, seg.x2 - seg.x1, Math.max(0, display.y1 - display.y0 - 14));
+            ctx.clip();
+
+            let currentY0 = display.y0 + 14;
+            if (showLeafLevels && leafContentHeight > 0) {
+              currentY0 += nestedLevelInset;
+              drawNestedLeafLevels(node, hierarchyLabel, currentY0, leafContentHeight);
+              currentY0 += leafContentHeight;
+            }
+            if (hasChildren && expanded) {
+              currentY0 += nestedLevelInset;
+              const children = getSortedHierarchyChildren(node);
+              for (let i = 0; i < children.length; i += 1) {
+                const child = children[i];
+                const childHeight = measureNestedNodeBoxHeight(child);
+                const childDisplay = {
+                  x1: Math.max(display.x1 + nestedLevelInset, seg.x1),
+                  x2: Math.min(display.x2 - nestedLevelInset, seg.x2),
+                  y0: currentY0,
+                  y1: currentY0 + childHeight
+                };
+                drawNode(child, childDisplay);
+                currentY0 += childHeight + (i < children.length - 1 ? nestedLevelInset : 0);
+              }
+            }
+            ctx.restore();
+          }
+        };
+
+        drawNode(block.nestedTree, parentDisplay);
+
+        if (block.nestedOverflowLabel) {
+          ctx.save();
+          ctx.font = '10px system-ui';
+          ctx.textBaseline = 'bottom';
+          ctx.fillStyle = 'rgba(17, 24, 39, 0.7)';
+          ctx.fillText(block.nestedOverflowLabel, margin.left + 4, block.detailY1 + nestedLevelInset - 2, Math.max(20, innerWidth - 8));
+          ctx.restore();
+        }
+      };
+
       const drawBars = () => {
+        const blocks = chartBlocksRef.current ?? [];
         ctx.clearRect(0, 0, innerWidth + margin.left + margin.right, stageHeight);
         lastGpuUploadMs = null;
         lastRendererMode = 'canvas';
@@ -1599,7 +2556,9 @@ export function useChartRenderer({
             chunk.bundle.meta.laneKeys.some((key) => lanePositions.has(String(key)))
           )
         );
-        const useWebGL = Boolean(activeRenderer && renderSoA && webglEnabled && hasSoAKeyOverlap);
+        const useWebGL = Boolean(
+          activeRenderer && renderSoA && webglEnabled && hasSoAKeyOverlap && !isLogicalDisplay
+        );
         const maxPrimitives = useWebGL
           ? Number.POSITIVE_INFINITY
           : PERF_BUDGETS.maxPrimitivesPerViewport;
@@ -1712,6 +2671,39 @@ export function useChartRenderer({
         });
         }
 
+        const drawProcessAggregateBars = (hierarchy1: string, headerY0: number, merged: any[]) => {
+          const y = headerY0 + 2;
+          const h = headerHeight - 4;
+          const leftBound = margin.left;
+          const rightBound = margin.left + innerWidth;
+          let collapsedCoveredEnd = -Infinity;
+          for (let itemIndex = 0; itemIndex < merged.length; itemIndex += 1) {
+            const item = merged[itemIndex];
+            if (budgetExceeded) return;
+            renderedPrimitives += 1;
+            if (renderedPrimitives > maxPrimitives) {
+              budgetExceeded = true;
+              return;
+            }
+            const displayRange = getDisplayRange(item);
+            const x1Raw = xOf(displayRange.start, p);
+            const x2Raw = xOf(displayRange.end, p);
+            if (x2Raw < leftBound || x1Raw > rightBound) continue;
+            if (x2Raw - x1Raw < 0.5) continue;
+            const x1 = Math.floor(x1Raw);
+            const endPx = Math.max(x1 + 1, Math.ceil(x2Raw));
+            const drawX = Math.max(x1, collapsedCoveredEnd);
+            if (drawX >= endPx) continue;
+            ctx.fillStyle = colorFor(item, `proc-${hierarchy1}`, {
+              type: 'process',
+              hierarchy1,
+              hierarchyValues: [String(hierarchy1)]
+            });
+            ctx.fillRect(drawX, y, endPx - drawX, h);
+            collapsedCoveredEnd = endPx;
+          }
+        };
+
         for (let i = startIdx; i < blocks.length; i++) {
           if (budgetExceeded) break;
           const block = blocks[i];
@@ -1745,47 +2737,23 @@ export function useChartRenderer({
 
           if (!block.expanded) {
             // Collapsed: draw merged process bars in header row (timeline aligned to time axis, no indent)
-            const y = block.headerY0 + 2;
-            const h = headerHeight - 4;
-            const leftBound = margin.left;
-            const rightBound = margin.left + innerWidth;
-            // Collapsed view: render each pixel at most once.
-            // Events may come from multiple threads that overlap in time,
-            // but the collapsed bar should be uniform — clip each event
-            // to only its uncovered portion so no pixel is painted twice.
-            let collapsedCoveredEnd = -Infinity;
-            merged.forEach((item: any) => {
-              if (budgetExceeded) return;
-              renderedPrimitives += 1;
-              if (renderedPrimitives > maxPrimitives) {
-                budgetExceeded = true;
-                return;
-              }
-              const x1Raw = xOf(item.start ?? item.timeStart ?? 0, p);
-              const x2Raw = xOf(item.end ?? item.timeEnd ?? 0, p);
-              if (x2Raw < leftBound || x1Raw > rightBound) return;
-              // Skip sub-pixel bars to avoid phantom strips at axis boundaries
-              if (x2Raw - x1Raw < 0.5) return;
-              const x1 = Math.floor(x1Raw);
-              const endPx = Math.max(x1 + 1, Math.ceil(x2Raw));
-              // Only render the portion beyond what's already covered
-              const drawX = Math.max(x1, collapsedCoveredEnd);
-              if (drawX >= endPx) return; // fully covered
-              ctx.fillStyle = colorFor(item, `proc-${block.hierarchy1}`, {
-                type: 'process',
-                hierarchy1: block.hierarchy1,
-                hierarchyValues: [String(block.hierarchy1)]
-              });
-              ctx.fillRect(drawX, y, endPx - drawX, h);
-              collapsedCoveredEnd = endPx;
-            });
+            drawProcessAggregateBars(block.hierarchy1, block.headerY0, merged);
             continue;
+          }
+
+          if (block.displayMode === 'nested') {
+            drawNestedBlock(block, p, lanePositions);
+            continue;
+          }
+
+          if (merged.length > 0) {
+            drawProcessAggregateBars(block.hierarchy1, block.headerY0, merged);
           }
 
           // Expanded: draw a detail box (width based on process time extent), then draw lane events inside (timeline aligned, no indent).
           if (merged.length > 0) {
-            const minT = merged[0].start ?? merged[0].timeStart;
-            const maxT = merged[merged.length - 1].end ?? merged[merged.length - 1].timeEnd;
+            const minT = getDisplayRange(merged[0]).start;
+            const maxT = getDisplayRange(merged[merged.length - 1]).end;
             const boxX1 = xOf(minT, p);
             const boxX2 = xOf(maxT, p);
             const boxY0 = block.headerY0 + 1;
@@ -1801,9 +2769,10 @@ export function useChartRenderer({
             ctx.strokeRect(boxX1 + 0.5, boxY0 + 0.5, boxW, boxH);
 
             // Lanes (only visible ones)
-            block.lanes.forEach((lane: any) => {
-              if (lane.type !== 'lane' && lane.type !== 'group') return;
-              if (lane.y1 < yMin || lane.y0 > yMax) return;
+            for (let laneIndex = 0; laneIndex < block.lanes.length; laneIndex += 1) {
+              const lane: any = block.lanes[laneIndex];
+              if (lane.type !== 'lane' && lane.type !== 'group') continue;
+              if (lane.y1 < yMin || lane.y0 > yMax) continue;
 
               const laneY0 = lane.y0;
               const laneY1 = lane.y1;
@@ -1862,8 +2831,9 @@ export function useChartRenderer({
                   budgetExceeded = true;
                   return;
                 }
-                const tStart = ev.start ?? ev.timeStart ?? 0;
-                const tEnd = ev.end ?? ev.timeEnd ?? 0;
+                const displayRange = getDisplayRange(ev);
+                const tStart = displayRange.start;
+                const tEnd = displayRange.end;
                 const isSummary = ev?.kind === 'summary';
                 const x1Raw = xOf(tStart, p);
                 const x2Raw = xOf(tEnd, p);
@@ -1927,7 +2897,7 @@ export function useChartRenderer({
                   }
                 }
               });
-            });
+            }
           }
         }
 
@@ -1951,75 +2921,75 @@ export function useChartRenderer({
           minimapCtx.fillStyle = '#ffffff';
           minimapCtx.fillRect(0, 0, topWidth, minimapHeight);
 
-          // Reserve a small strip at the bottom for tick labels
-          const ticksReserve = 18;
-          const usableH = Math.max(10, minimapHeight - 8 - ticksReserve);
-          const laneH = usableH / LANE_COUNT;
-          const binW = innerWidth / overviewBinsCount;
+          const marginTopMinimap = minimapMarginTop;
+          const marginBottomMinimap = minimapMarginBottom;
 
-          for (let lane = 0; lane < LANE_COUNT; lane++) {
-            const maxV = laneMax[lane] || 1;
-            const yBase = 4 + (lane + 1) * laneH;
-            const fallbackPalette =
-              Array.isArray(colorConfig?.palette) && colorConfig.palette.length > 0
-                ? colorConfig.palette
-                : defaultPalette;
-            const color = laneColors[lane] || fallbackPalette[lane % fallbackPalette.length];
-            // draw with alpha safely (canvas doesn't accept #RRGGBBAA reliably across browsers)
-            minimapCtx.fillStyle = color;
-            minimapCtx.globalAlpha = 0.75;
-
-            for (let i = 0; i < overviewBinsCount; i++) {
-              const v = laneBins[lane][i];
-              if (v <= 0) continue;
-              const h = Math.sqrt(v / maxV) * (laneH - 2);
-              const x = margin.left + i * binW;
-              minimapCtx.fillRect(x, yBase - h, Math.max(1, binW), h);
-            }
-            minimapCtx.globalAlpha = 1;
+          if (overviewModel) {
+            drawOverviewChart(minimapCtx, overviewModel, {
+              width: topWidth,
+              height: minimapHeight,
+              marginLeft: margin.left,
+              marginRight: margin.right,
+              marginTop: marginTopMinimap,
+              marginBottom: marginBottomMinimap,
+              fillStyle: 'rgba(76, 120, 168, 0.6)',
+              palette:
+                Array.isArray(colorConfig?.palette) && colorConfig.palette.length > 0
+                  ? colorConfig.palette
+                  : defaultPalette
+            });
           }
 
-          let leftPx = margin.left + ((p.vs - fetchStart) / fetchSpan) * innerWidth;
-          let widthPx = ((p.ve - p.vs) / fetchSpan) * innerWidth;
+          let leftPx = margin.left + ((p.vs - domainStart) / domainSpan) * innerWidth;
+          let widthPx = ((p.ve - p.vs) / domainSpan) * innerWidth;
           leftPx = clampNumber(leftPx, margin.left, margin.left + innerWidth);
           widthPx = clampNumber(widthPx, 2, margin.left + innerWidth - leftPx);
+          minimapWindowEl.style.top = `${marginTopMinimap}px`;
+          minimapWindowEl.style.height = `${Math.max(0, minimapHeight - marginTopMinimap - marginBottomMinimap)}px`;
           minimapWindowEl.style.left = `${leftPx}px`;
           minimapWindowEl.style.width = `${widthPx}px`;
         }
 
         const axisTimeFormat =
           ganttConfig?.xAxis?.timeFormat === 'full' ? formatTimeUsFull : formatTimeUs;
+        const axisTickFormat = (value: number) =>
+          timeScaleMode === 'logical' ? `${Math.round(value)}` : axisTimeFormat(value);
 
-        // Minimap ticks for fetched range
+        // Minimap ticks for the full current domain
         if (minimapAxisGroup) {
           const tickCount = Math.max(4, Math.floor(innerWidth / 160));
           const scale = d3
             .scaleLinear()
-            .domain([fetchStart, fetchEnd])
+            .domain([domainStart, domainEnd])
             .range([margin.left, margin.left + innerWidth]);
+          minimapAxisGroup.attr('transform', `translate(0, ${minimapAxisY})`);
           minimapAxisGroup.call(
             d3
               .axisBottom(scale)
               .ticks(tickCount)
-              .tickFormat((d) => axisTimeFormat(d as number))
-              // .tickSizeOuter(0)
+              .tickFormat((d) => axisTickFormat(d as number))
+              .tickSizeOuter(0)
+              .tickSizeInner(4)
+              .tickPadding(2)
           );
-          minimapAxisGroup.selectAll('text').style('font-size', '10px').style('fill', '#6b7280');
+          minimapAxisGroup
+            .selectAll('text')
+            .style('font-size', '10px')
+            .style('fill', '#6b7280')
+            .style('font-family', 'system-ui')
+            .style('font-variant-numeric', 'tabular-nums');
           minimapAxisGroup.selectAll('path,line').style('stroke', '#d1d5db');
         }
 
         // Fixed x-axis (zoom target)
         if (axisGroup) {
           const tickCount = Math.max(4, Math.floor(innerWidth / 140));
-          const scale = d3
-            .scaleLinear()
-            .domain([p.vs, p.ve])
-            .range([margin.left, margin.left + innerWidth]);
+          const scale = timeScale.d3Scale(p);
           axisGroup.call(
             d3
-              .axisBottom(scale)
+              .axisBottom(scale as any)
               .ticks(tickCount)
-              .tickFormat((d) => axisTimeFormat(d as number))
+              .tickFormat((d) => axisTickFormat(d as number))
               // .tickSizeOuter(0)
           );
           axisGroup.selectAll('text').style('font-size', '12px').style('fill', '#555');
@@ -2032,87 +3002,103 @@ export function useChartRenderer({
       const renderDependencies = () => {
         dependencyLayer.selectAll('*').remove();
         const dependencyEnabled = dataMapping?.features?.dependencyLines;
-        const dependencyField = dataMapping?.features?.dependencyField;
         if (!dependencyEnabled || !dependencyField) return;
-        const selectionId = viewStateRef.current?.selection;
-        if (!selectionId) return;
-        const selected = chartData.find(
-          (ev) => String(ev?.id ?? '') === String(selectionId)
-        );
-        if (!selected) return;
+        const dependencyConfig = ganttConfig?.dependencies || GANTT_CONFIG.dependencies || {};
+        const selectionId = String(viewStateRef.current?.selection ?? '').trim() || null;
+        const amount = dependencyConfig.amount ?? '1hop';
+        const persistence = dependencyConfig.persistence ?? 'onClick';
+        const connector = dependencyConfig.connector ?? 'arrow';
+        const drawingStyle = dependencyConfig.drawingStyle ?? 'spline';
+        const strokeColor = dependencyConfig.strokeColor ?? 'rgba(59,130,246,0.45)';
+        const strokeWidth = Math.max(0.5, Number(dependencyConfig.strokeWidth ?? 1.5));
+        const arrowSize = Math.max(2, Number(dependencyConfig.arrowSize ?? 6));
+        const maxEdges = Number(dependencyConfig.maxEdges ?? 200);
 
-        const rawDeps =
-          (selected as any)?.[dependencyField] ?? (selected as any)?.args?.[dependencyField];
-        const depIds = Array.isArray(rawDeps)
-          ? rawDeps
-          : typeof rawDeps === 'string'
-            ? rawDeps.split(',').map((id: string) => id.trim()).filter(Boolean)
-            : [];
-        if (depIds.length === 0) return;
+        if (persistence === 'toggle' && !viewStateRef.current?.dependenciesVisible) return;
+        if (persistence === 'onClick' && !selectionId) return;
 
-        const maxEdges = Number(ganttConfig?.dependencies?.maxEdges ?? 200);
-        const depEvents = depIds
-          .slice(0, maxEdges)
-          .map((id) => chartData.find((ev) => String(ev?.id ?? '') === String(id)))
-          .filter(Boolean) as any[];
-        if (depEvents.length === 0) return;
-
-        const selectedKey = String(
-          selected?.laneKey ??
-            buildHierarchyLaneKey(
-              Array.isArray(selected?.hierarchyValues) && selected.hierarchyValues.length > 0
-                ? selected.hierarchyValues
-                : [selected?.hierarchy1, selected?.hierarchy2],
-              selected?.level ?? 0
-            )
-        );
-        const selectedLane = lastLanePositions.get(selectedKey);
-        if (!selectedLane) return;
+        const getLaneKey = (event: any) =>
+          String(
+            event?.laneKey ??
+              buildHierarchyLaneKey(
+                Array.isArray(event?.hierarchyValues) && event.hierarchyValues.length > 0
+                  ? event.hierarchyValues
+                  : [event?.hierarchy1, event?.hierarchy2],
+                event?.level ?? 0
+              )
+          );
         const p = getViewParams();
-        const sx = xOf(selected.start, p);
-        const sy = selectedLane.y + selectedLane.h / 2;
+        const xMin = margin.left - 40;
+        const xMax = margin.left + innerWidth + 40;
+        const edgeData = getVisibleEdges(dependencyIndex, amount, selectionId, maxEdges)
+          .map((edge) => {
+            const source = dependencyIndex.eventById.get(edge.sourceId);
+            const target = dependencyIndex.eventById.get(edge.targetId);
+            if (!source || !target) return null;
+            const sourceLane = lastLanePositions.get(getLaneKey(source));
+            const targetLane = lastLanePositions.get(getLaneKey(target));
+            if (!sourceLane || !targetLane) return null;
+            const sourceRange = getDisplayRange(source);
+            const targetRange = getDisplayRange(target);
+            const sx = xOf(sourceRange.start, p);
+            const tx = xOf(targetRange.start, p);
+            if ((sx < xMin && tx < xMin) || (sx > xMax && tx > xMax)) return null;
+            const sy = sourceLane.y + sourceLane.h / 2;
+            const ty = targetLane.y + targetLane.h / 2;
+            return {
+              ...edge,
+              d: buildDependencyPath(drawingStyle, sx, sy, tx, ty)
+            };
+          })
+          .filter(Boolean) as Array<{ sourceId: string; targetId: string; d: string }>;
+        if (edgeData.length === 0) return;
+
+        let markerRef: string | null = null;
+        if (connector === 'arrow') {
+          const markerId = 'gantt-dependency-arrow';
+          markerRef = `url(#${markerId})`;
+          dependencyLayer
+            .append('defs')
+            .append('marker')
+            .attr('id', markerId)
+            .attr('viewBox', `0 0 ${arrowSize} ${arrowSize}`)
+            .attr('refX', arrowSize - 1)
+            .attr('refY', arrowSize / 2)
+            .attr('markerWidth', arrowSize)
+            .attr('markerHeight', arrowSize)
+            .attr('markerUnits', 'userSpaceOnUse')
+            .attr('orient', 'auto')
+            .append('path')
+            .attr('d', `M0,0 L0,${arrowSize} L${arrowSize},${arrowSize / 2} z`)
+            .attr('fill', strokeColor);
+        }
 
         dependencyLayer
-          .selectAll('path')
-          .data(depEvents)
+          .selectAll('path.gantt-dependency-path')
+          .data(edgeData)
           .join('path')
-          .attr('d', (ev: any) => {
-            const depKey = String(
-              ev?.laneKey ??
-                buildHierarchyLaneKey(
-                  Array.isArray(ev?.hierarchyValues) && ev.hierarchyValues.length > 0
-                    ? ev.hierarchyValues
-                    : [ev?.hierarchy1, ev?.hierarchy2],
-                  ev?.level ?? 0
-                )
-            );
-            const depLane = lastLanePositions.get(depKey);
-            if (!depLane) return '';
-            const tx = xOf(ev.start, p);
-            const ty = depLane.y + depLane.h / 2;
-            const mx = (sx + tx) / 2;
-            return `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`;
-          })
+          .attr('class', 'gantt-dependency-path')
+          .attr('d', (edge: any) => edge.d)
           .attr('fill', 'none')
-          .attr('stroke', 'rgba(59,130,246,0.45)')
-          .attr('stroke-width', 1);
+          .attr('stroke', strokeColor)
+          .attr('stroke-width', strokeWidth)
+          .attr('marker-end', markerRef);
       };
 
       const renderYLabels = () => {
+        const blocks = chartBlocksRef.current ?? [];
         ensureYAxis();
         if (!yAxisGroup) return;
-        const vh = Math.max(100, container.clientHeight || 400);
         if (yAxisHost) {
-          yAxisHost.style.height = `${vh}px`;
+          yAxisHost.style.height = `${stageHeight}px`;
           const yAxisSvg = yAxisHost.querySelector('svg');
           if (yAxisSvg) {
-            yAxisSvg.setAttribute('height', String(vh));
-            yAxisSvg.style.setProperty('height', `${vh}px`);
+            yAxisSvg.setAttribute('height', String(stageHeight));
+            yAxisSvg.style.setProperty('height', `${stageHeight}px`);
           }
         }
         const yMin = container.scrollTop;
-        const yMax = yMin + (container.clientHeight || vh);
-        const scrollY = container.scrollTop;
+        const yMax = yMin + container.clientHeight;
 
         // Binary search for first visible block
         let lo = 0;
@@ -2132,12 +3118,9 @@ export function useChartRenderer({
           if (blocks[i].y0 > yMax) break;
           endIdx = i;
         }
-        if (yAxisSeparatorEl && blocks[startIdx] && blocks[endIdx]) {
-          const sepTop = blocks[startIdx].y0 - scrollY;
-          const sepBottom = blocks[endIdx].y1 - scrollY;
-          const sepH = Math.max(0, sepBottom - sepTop);
-          yAxisSeparatorEl.style.top = `${sepTop}px`;
-          yAxisSeparatorEl.style.height = `${sepH}px`;
+        if (yAxisSeparatorEl) {
+          yAxisSeparatorEl.style.top = '0px';
+          yAxisSeparatorEl.style.height = `${stageHeight}px`;
         }
 
         const labels: Array<{
@@ -2170,7 +3153,7 @@ export function useChartRenderer({
             const startBlock = blocks[g.startBlockIndex];
             const endBlock = blocks[g.endBlockIndex];
             if (!startBlock || !endBlock || endBlock.y1 < yMin || startBlock.y0 > yMax) return;
-            const groupY = startBlock.y0 - scrollY;
+            const groupY = startBlock.y0;
             const groupH = endBlock.y1 - startBlock.y0;
             const radius = Math.min(FORK_CARD_RADIUS, groupH / 2);
             bgRects.push({
@@ -2188,7 +3171,7 @@ export function useChartRenderer({
             if (!parentBlock || parentBlock.headerY1 < yMin || parentBlock.headerY0 > yMax) return;
             bgRects.push({
               key: `bg-forkheader-${gi}`,
-              y: parentBlock.headerY0 - scrollY,
+              y: parentBlock.headerY0,
               h: headerHeight,
               fill: FORK_HEADER_FILL_Y
             });
@@ -2217,14 +3200,14 @@ export function useChartRenderer({
             if (block.expanded) {
               bgRects.push({
                 key: `bg-proc-${block.hierarchy1}`,
-                y: block.y0 - scrollY,
+                y: block.y0,
                 h: block.y1 - block.y0,
                 fill: blockFill
               });
             } else {
               bgRects.push({
                 key: `bg-proc-${block.hierarchy1}`,
-                y: block.headerY0 - scrollY,
+                y: block.headerY0,
                 h: headerHeight,
                 fill: blockFill
               });
@@ -2247,7 +3230,7 @@ export function useChartRenderer({
             kind: 'process',
             text: processFit.displayText,
             x: LEFT_PAD,
-            y: block.headerY0 + headerHeight / 2 - scrollY,
+            y: block.headerY0 + headerHeight / 2,
             fontSize: processFit.fontSize,
             fontWeight: procFw,
             indent: 0,
@@ -2256,7 +3239,7 @@ export function useChartRenderer({
             symbolWidth: procSymbolW || undefined
           });
 
-          if (block.expanded) {
+          if (block.expanded && block.displayMode === 'rows') {
             block.lanes.forEach((lane: any) => {
               if (lane.type === 'group') {
                 if (lane.y1 < yMin || lane.y0 > yMax) return;
@@ -2274,7 +3257,7 @@ export function useChartRenderer({
                   kind: 'lane',
                   text: groupFit.displayText,
                   x: LEFT_PAD,
-                  y: lane.y0 + (lane.y1 - lane.y0) / 2 - scrollY,
+                  y: lane.y0 + (lane.y1 - lane.y0) / 2,
                   fontSize: groupFit.fontSize,
                   fontWeight: 600,
                   indent: groupIndent,
@@ -2304,7 +3287,7 @@ export function useChartRenderer({
                   kind: 'lane',
                   text: laneFit.displayText,
                   x: LEFT_PAD,
-                  y: lane.y0 + (lane.y1 - lane.y0) / 2 - scrollY,
+                  y: lane.y0 + (lane.y1 - lane.y0) / 2,
                   fontSize: laneFit.fontSize,
                   fontWeight: 500,
                   indent: laneIndent,
@@ -2389,7 +3372,7 @@ export function useChartRenderer({
       const updateVisibleWindow = () => {
         // Kept for compatibility; draw/render handle visibility from scroll directly.
         visibleState.startIndex = 0;
-        visibleState.endIndex = blocks.length;
+        visibleState.endIndex = (chartBlocksRef.current ?? []).length;
       };
 
       const redraw = () => {
@@ -2447,6 +3430,7 @@ export function useChartRenderer({
       redraw();
 
       const findBlockByY = (y: number) => {
+        const blocks = chartBlocksRef.current ?? [];
         let lo = 0;
         let hi = blocks.length - 1;
         while (lo <= hi) {
@@ -2468,26 +3452,25 @@ export function useChartRenderer({
 
         // Header area
         if (y >= block.headerY0 && y <= block.headerY1) {
-          if (block.expanded) return { area: 'header', block, lane: null, item: null };
           const bucket = processAggregates.get(block.hierarchy1) || [];
           let lo = 0;
           let hi = bucket.length - 1;
           while (lo <= hi) {
             const mid = Math.floor((lo + hi) / 2);
             const item = bucket[mid];
-            const start = item.start ?? item.timeStart;
-            const end = item.end ?? item.timeEnd;
+            const displayRange = getDisplayRange(item);
+            const start = displayRange.start;
+            const end = displayRange.end;
             if (time < start) hi = mid - 1;
             else if (time > end) lo = mid + 1;
             else return { area: 'process', block, lane: null, item };
           }
-          return { area: 'process', block, lane: null, item: null };
+          return { area: 'header', block, lane: null, item: null };
         }
 
         // Detail lanes (expanded)
         if (
           !block.expanded ||
-          !block.lanes ||
           block.detailY0 == null ||
           block.detailY1 == null ||
           y < block.detailY0 ||
@@ -2496,19 +3479,61 @@ export function useChartRenderer({
           return { area: 'header', block, lane: null, item: null };
         }
 
+        if (block.displayMode === 'nested') {
+          let bestHit: any = null;
+          let bestArea = Number.POSITIVE_INFINITY;
+          for (let idx = block.nestedItems.length - 1; idx >= 0; idx -= 1) {
+            const item = block.nestedItems[idx];
+            const segments = Array.isArray(item?.displaySegments) && item.displaySegments.length > 0
+              ? item.displaySegments
+              : item?.display
+                ? [item.display]
+                : [];
+            for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+              const raw = segments[segmentIndex];
+              if (!raw) continue;
+              const segX1 = raw.x1 ?? (raw as any).sDrawLeft;
+              const segX2 = raw.x2 ?? (raw as any).sDrawRight;
+              const segY0 = raw.y0;
+              const segY1 = raw.y1;
+              if (segX1 == null || segX2 == null || segY0 == null || segY1 == null) continue;
+              if (x >= segX1 && x <= segX2 && y >= segY0 && y <= segY1) {
+                const area = Math.max(1, segX2 - segX1) * Math.max(1, segY1 - segY0);
+                if (area < bestArea) {
+                  bestArea = area;
+                  bestHit = {
+                    area: 'nested',
+                    block,
+                    lane: item?.nestedLane ?? null,
+                    item,
+                    segmentIndex,
+                    segmentSourceIndex: (raw as any).sourceIndex ?? segmentIndex
+                  };
+                }
+              }
+            }
+          }
+          return bestHit ?? { area: 'nested', block, lane: null, item: null };
+        }
+
+        if (!block.lanes) {
+          return { area: 'lane', block, lane: null, item: null };
+        }
+
         const lane = block.lanes.find(
           (l: any) => (l.type === 'lane' || l.type === 'group') && y >= l.y0 && y <= l.y1
         );
         if (!lane) return { area: 'lane', block, lane: null, item: null };
 
-        const events = lane.renderEvents || lane.events || [];
+        const events = lane.renderEvents || getLaneDisplayEvents(lane) || [];
         let lo2 = 0;
         let hi2 = events.length - 1;
         while (lo2 <= hi2) {
           const mid = Math.floor((lo2 + hi2) / 2);
           const item = events[mid];
-          const start = item.start ?? item.timeStart;
-          const end = item.end ?? item.timeEnd;
+          const displayRange = getDisplayRange(item);
+          const start = displayRange.start;
+          const end = displayRange.end;
           if (time < start) hi2 = mid - 1;
           else if (time > end) lo2 = mid + 1;
           else return { area: 'lane', block, lane, item };
@@ -2516,18 +3541,53 @@ export function useChartRenderer({
         return { area: 'lane', block, lane, item: null };
       };
 
+      const setTrackedFisheyeFocus = (x: number) => {
+        if (timeScaleMode !== 'fisheye') return false;
+        if (ganttConfig?.xAxis?.fisheye?.focusTime != null) return false;
+        if (x < margin.left || x > margin.left + innerWidth) return false;
+        const p = getViewParams();
+        const nextFocus = p.vs + ((x - margin.left) / innerWidth) * p.span;
+        if (!Number.isFinite(nextFocus)) return false;
+        const prevFocus = fisheyeFocusTimeRef.current;
+        const minDelta = p.span / Math.max(innerWidth, 1);
+        if (prevFocus != null && Math.abs(prevFocus - nextFocus) <= minDelta) return false;
+        fisheyeFocusTimeRef.current = nextFocus;
+        if (viewStateRef.current) {
+          viewStateRef.current = {
+            ...viewStateRef.current,
+            fisheyeFocusTime: nextFocus
+          };
+        }
+        return true;
+      };
+      const clearTrackedFisheyeFocus = () => {
+        if (timeScaleMode !== 'fisheye') return false;
+        if (ganttConfig?.xAxis?.fisheye?.focusTime != null) return false;
+        if (fisheyeFocusTimeRef.current == null) return false;
+        fisheyeFocusTimeRef.current = null;
+        if (viewStateRef.current) {
+          viewStateRef.current = {
+            ...viewStateRef.current,
+            fisheyeFocusTime: null
+          };
+        }
+        return true;
+      };
+
       let hoverFrame = 0;
       let lastHover: { clientX: number; clientY: number } | null = null;
       let lastTooltipItem: any = null;
       const handleMouseMove = (e: MouseEvent) => {
+        if (isDraggingChart) return;
         lastHover = { clientX: e.clientX, clientY: e.clientY };
         if (hoverFrame) return;
         hoverFrame = requestAnimationFrame(() => {
           hoverFrame = 0;
           if (!lastHover) return;
-          const rect = container.getBoundingClientRect();
-          const x = lastHover.clientX - rect.left + container.scrollLeft;
-          const y = lastHover.clientY - rect.top + container.scrollTop;
+          const rect = stage.getBoundingClientRect();
+          const x = lastHover.clientX - rect.left;
+          const y = lastHover.clientY - rect.top;
+          const focusChanged = setTrackedFisheyeFocus(x);
           const hit = findItemAtPosition(x, y);
           const nextHoveredTrack = hit ? `proc-${hit.block.hierarchy1}` : null;
           const nextHoveredItem = hit ? hit.item : null;
@@ -2536,7 +3596,43 @@ export function useChartRenderer({
             nextHoveredItem !== visibleState.hoveredItem;
           visibleState.hoveredTrack = nextHoveredTrack;
           visibleState.hoveredItem = nextHoveredItem;
-          if (hoverChanged) {
+
+          // Handle cursor style for nested expand/collapse buttons (per-segment)
+          if (hit?.item?.kind === 'nestedHierarchy' && hit.item.expandable) {
+            const segs = hit.item.displaySegments || (hit.item.display ? [hit.item.display] : []);
+            const segIdx = (hit as any).segmentIndex ?? 0;
+            const segSourceIndex = (hit as any).segmentSourceIndex ?? segIdx;
+            const segment = segs[segIdx];
+            if (segment) {
+              const normalizedSeg = {
+                x1: segment.x1 ?? (segment as any).sDrawLeft,
+                x2: segment.x2 ?? (segment as any).sDrawRight,
+                y0: segment.y0,
+                y1: segment.y1
+              };
+              const fullKey = `${hit.item.expandKey ?? ''}|${segSourceIndex}`;
+              const isSegExpanded = expandedHierarchyKeySet.has(fullKey);
+              const headerHeight = isSegExpanded ? 14 : Math.max(14, normalizedSeg.y1 - normalizedSeg.y0);
+              if (
+                x >= normalizedSeg.x1 &&
+                x <= Math.min(normalizedSeg.x1 + 30, normalizedSeg.x2) &&
+                y >= normalizedSeg.y0 &&
+                y <= normalizedSeg.y0 + headerHeight
+              ) {
+                stage.style.cursor = 'pointer';
+              } else {
+                stage.style.cursor = 'default';
+              }
+            } else {
+              stage.style.cursor = 'default';
+            }
+          } else {
+            stage.style.cursor = 'default';
+          }
+
+          if (focusChanged) {
+            redraw();
+          } else if (hoverChanged) {
             redrawBarsOnly();
           }
 
@@ -2553,8 +3649,16 @@ export function useChartRenderer({
             const item = hit.item;
             if (item !== lastTooltipItem) {
               lastTooltipItem = item;
+              if (item?.kind === 'nestedHierarchy') {
+                tooltip.innerHTML = buildNestedTooltipHtml(item);
+                return;
+              }
               if (item?.kind === 'summary') {
                 tooltip.innerHTML = buildSummaryTooltipHtml(item);
+                return;
+              }
+              if (item?.kind === 'aggregateSegment') {
+                tooltip.innerHTML = buildAggregateSegmentTooltipHtml(item);
                 return;
               }
               const resolvedHierarchyValues =
@@ -2572,8 +3676,8 @@ export function useChartRenderer({
                     ];
               const hierarchy1 = resolvedHierarchyValues[0] ?? 'unknown';
               const hierarchy2 = resolvedHierarchyValues.slice(1).join('|') || hierarchy1;
-              const startUs = Number(item.start ?? item.timeStart);
-              const endUs = Number(item.end ?? item.timeEnd);
+              const startUs = getPhysicalStart(item);
+              const endUs = getPhysicalEnd(item);
               const durationUs =
                 Number.isFinite(startUs) && Number.isFinite(endUs)
                   ? Math.max(0, endUs - startUs)
@@ -2623,7 +3727,10 @@ export function useChartRenderer({
         visibleState.hoveredItem = null;
         lastTooltipItem = null;
         tooltip.style.display = 'none';
-        redrawBarsOnly();
+        stage.style.cursor = 'default';
+        const focusCleared = clearTrackedFisheyeFocus();
+        if (focusCleared) redraw();
+        else redrawBarsOnly();
       };
 
       let viewRangeSyncTimer: number | null = null;
@@ -2632,8 +3739,10 @@ export function useChartRenderer({
           window.clearTimeout(viewRangeSyncTimer);
           viewRangeSyncTimer = null;
         }
-        const current = viewRangeRef.current || { start: fetchStart, end: fetchEnd };
-        setViewRange({ start: Math.round(current.start), end: Math.round(current.end) });
+        const current = getStoredViewRange();
+        const physicalRange = getPhysicalViewRangeForState(current);
+        viewRangeRef.current = physicalRange;
+        setViewRange(physicalRange);
       };
       const scheduleViewRangeStateSync = () => {
         if (viewRangeSyncTimer) {
@@ -2641,20 +3750,23 @@ export function useChartRenderer({
         }
         viewRangeSyncTimer = window.setTimeout(() => {
           viewRangeSyncTimer = null;
-          const current = viewRangeRef.current || { start: fetchStart, end: fetchEnd };
-          setViewRange({ start: Math.round(current.start), end: Math.round(current.end) });
+          const current = getStoredViewRange();
+          const physicalRange = getPhysicalViewRangeForState(current);
+          viewRangeRef.current = physicalRange;
+          setViewRange(physicalRange);
         }, 180);
       };
       const updateViewRangeRefAndRedraw = (next: ViewRange, syncToState = false) => {
-        const nextStart = Math.round(clampNumber(Number(next.start), fetchStart, fetchEnd));
-        const nextEnd = Math.round(clampNumber(Number(next.end), fetchStart, fetchEnd));
+        const normalized = normalizeDisplayRange(next);
+        const nextStart = normalized.start;
+        const nextEnd = normalized.end;
         if (!Number.isFinite(nextStart) || !Number.isFinite(nextEnd) || nextEnd <= nextStart) return;
-        const prev = viewRangeRef.current || { start: fetchStart, end: fetchEnd };
+        const prev = getStoredViewRange();
         if (nextStart === Number(prev.start) && nextEnd === Number(prev.end)) {
           if (syncToState) syncViewRangeToState();
           return;
         }
-        viewRangeRef.current = { start: nextStart, end: nextEnd };
+        setStoredViewRange({ start: nextStart, end: nextEnd });
         redraw();
         if (syncToState) {
           syncViewRangeToState();
@@ -2672,24 +3784,48 @@ export function useChartRenderer({
         }
       };
 
+      const toggleHierarchyExpand = (expandKey: string, expand: boolean) => {
+        const key = String(expandKey || '').trim();
+        if (!key) return;
+        const t = lastExpandToggleRef.current;
+        if (t.key === key && Date.now() - t.at < 200) return;
+        lastExpandToggleRef.current = { key, at: Date.now() };
+        setExpandedHierarchy1Ids((prev) =>
+          expand ? (prev.includes(key) ? prev : [...prev, key]) : prev.filter((p) => p !== key && !p.startsWith(`${key}|`))
+        );
+      };
+
       let blockNextClick = false;
       const handleClick = (e: MouseEvent) => {
         if (blockNextClick) {
           blockNextClick = false;
           return;
         }
-        const rect = container.getBoundingClientRect();
+        const rect = stage.getBoundingClientRect();
         const xViewport = e.clientX - rect.left;
-        const y = e.clientY - rect.top + container.scrollTop;
-        const x = xViewport + container.scrollLeft;
+        const y = e.clientY - rect.top;
+        const x = xViewport;
         if (xViewport > margin.left) {
           const hit = findItemAtPosition(x, y);
-          if (hit?.item?.kind === 'summary') {
-            const summaryStart = Number(hit.item.start ?? 0);
-            const summaryEnd = Number(hit.item.end ?? 0);
-            if (Number.isFinite(summaryStart) && Number.isFinite(summaryEnd) && summaryEnd > summaryStart) {
-              setViewRange({ start: summaryStart, end: summaryEnd });
+          if (hit?.item?.kind === 'nestedHierarchy') {
+            const baseKey = String(hit.item.expandKey || '');
+            const segIdx = (hit as any).segmentIndex ?? 0;
+            const segSourceIndex = (hit as any).segmentSourceIndex ?? segIdx;
+            const segs = (hit.item.displaySegments || (hit.item.display ? [hit.item.display] : [])).map((s: any) => ({
+              x1: s.x1 ?? s.sDrawLeft, x2: s.x2 ?? s.sDrawRight, y0: s.y0, y1: s.y1
+            }));
+            const seg = segs[segIdx] ?? segs[0];
+            const fullKey = `${baseKey}|${segSourceIndex}`;
+            const isExp = expandedHierarchyKeySet.has(fullKey);
+            const h = seg ? (isExp ? 14 : Math.max(14, seg.y1 - seg.y0)) : 14;
+            const inBtn = seg && x >= seg.x1 && x <= Math.min(seg.x1 + 30, seg.x2) && y >= seg.y0 && y <= seg.y0 + h;
+            if (hit.item.expandable && baseKey && inBtn) {
+              e.preventDefault();
+              e.stopPropagation();
+              toggleHierarchyExpand(fullKey, !isExp);
+              return; // Important: prevent falling through
             }
+            return;
           }
           if (hit?.item && hit.item.kind !== 'summary') {
             const nextId = hit.item.id ?? null;
@@ -2710,15 +3846,9 @@ export function useChartRenderer({
         const block = findBlockByY(y);
         if (!block) return;
         if (y >= block.headerY0 && y <= block.headerY1) {
-          const hierarchy1Id = block.hierarchy1;
-          setExpandedHierarchy1Ids((prev) => {
-            const has = prev.includes(hierarchy1Id);
-            if (has) {
-              const prefix = `${hierarchy1Id}|`;
-              return prev.filter((p) => p !== hierarchy1Id && !p.startsWith(prefix));
-            }
-            return [...prev, hierarchy1Id];
-          });
+          e.preventDefault();
+          e.stopPropagation();
+          toggleHierarchyExpand(block.hierarchy1, !block.expanded);
           return;
         }
         if (!block.expanded || !Array.isArray(block.lanes)) return;
@@ -2726,32 +3856,20 @@ export function useChartRenderer({
         if (!row || row.type !== 'group' || !row.expandable) return;
         const expandKey = String(row.expandKey || '');
         if (!expandKey) return;
-        setExpandedHierarchy1Ids((prev) => {
-          const has = prev.includes(expandKey);
-          if (has) {
-            const prefix = `${expandKey}|`;
-            return prev.filter((p) => p !== expandKey && !p.startsWith(prefix));
-          }
-          return [...prev, expandKey];
-        });
+        e.preventDefault();
+        e.stopPropagation();
+        toggleHierarchyExpand(expandKey, !(row as any).expanded);
         // keep scroll position
       };
 
       const handleAxisClick = (e: MouseEvent) => {
-        const rect = container.getBoundingClientRect();
-        const y = e.clientY - rect.top + container.scrollTop;
+        const rect = yAxisHost?.getBoundingClientRect();
+        if (!rect) return;
+        const y = e.clientY - rect.top;
         const block = findBlockByY(y);
         if (!block) return;
         if (y >= block.headerY0 && y <= block.headerY1) {
-          const hierarchy1Id = block.hierarchy1;
-          setExpandedHierarchy1Ids((prev) => {
-            const has = prev.includes(hierarchy1Id);
-            if (has) {
-              const prefix = `${hierarchy1Id}|`;
-              return prev.filter((p) => p !== hierarchy1Id && !p.startsWith(prefix));
-            }
-            return [...prev, hierarchy1Id];
-          });
+          toggleHierarchyExpand(block.hierarchy1, !block.expanded);
           return;
         }
         if (!block.expanded || !Array.isArray(block.lanes)) return;
@@ -2759,14 +3877,36 @@ export function useChartRenderer({
         if (!row || row.type !== 'group' || !row.expandable) return;
         const expandKey = String(row.expandKey || '');
         if (!expandKey) return;
-        setExpandedHierarchy1Ids((prev) => {
-          const has = prev.includes(expandKey);
-          if (has) {
-            const prefix = `${expandKey}|`;
-            return prev.filter((p) => p !== expandKey && !p.startsWith(prefix));
-          }
-          return [...prev, expandKey];
-        });
+        toggleHierarchyExpand(expandKey, !(row as any).expanded);
+      };
+
+      const zoomAtX = (xInChart: number, deltaY: number) => {
+        const prev = getStoredViewRange();
+        const prevStart = Number(prev.start);
+        const prevEnd = Number(prev.end);
+        const span = Math.max(1, prevEnd - prevStart);
+        const zoomFactor = Math.exp(deltaY * 0.0015);
+        const minSpan = 1;
+        const newSpan = clampNumber(span * zoomFactor, minSpan, domainSpan);
+        const p = getViewParams();
+        const focusValue = tOf(xInChart, p);
+        let newStart = focusValue - (focusValue - prevStart) * (newSpan / span);
+        let newEnd = newStart + newSpan;
+
+        if (newStart < domainStart) {
+          newStart = domainStart;
+          newEnd = newStart + newSpan;
+        }
+        if (newEnd > domainEnd) {
+          newEnd = domainEnd;
+          newStart = newEnd - newSpan;
+        }
+
+        if (newEnd <= newStart) {
+          newStart = domainStart;
+          newEnd = domainEnd;
+        }
+        updateViewRangeRefAndRedraw({ start: newStart, end: newEnd });
       };
 
       // Ctrl + wheel zoom on the fixed x-axis (client-side view zoom; no refetch)
@@ -2785,35 +3925,7 @@ export function useChartRenderer({
         const rect = axisHost.getBoundingClientRect();
         const xViewport = e.clientX - rect.left;
         if (xViewport < margin.left || xViewport > margin.left + innerWidth) return;
-
-        const prev = viewRangeRef.current || { start: fetchStart, end: fetchEnd };
-        const prevStart = Number(prev?.start);
-        const prevEnd = Number(prev?.end);
-        const span = Math.max(1, prevEnd - prevStart);
-        const zoomFactor = Math.exp(e.deltaY * 0.0015); // >1 zoom out, <1 zoom in
-        const minSpan = 1000; // 1ms
-        const newSpan = clampNumber(span * zoomFactor, minSpan, fetchSpan);
-
-        const t = prevStart + ((xViewport - margin.left) / innerWidth) * span;
-        let newStart = t - (t - prevStart) * (newSpan / span);
-        let newEnd = newStart + newSpan;
-
-        if (newStart < fetchStart) {
-          newStart = fetchStart;
-          newEnd = newStart + newSpan;
-        }
-        if (newEnd > fetchEnd) {
-          newEnd = fetchEnd;
-          newStart = newEnd - newSpan;
-        }
-
-        newStart = clampNumber(newStart, fetchStart, fetchEnd);
-        newEnd = clampNumber(newEnd, fetchStart, fetchEnd);
-        if (newEnd <= newStart) {
-          newStart = fetchStart;
-          newEnd = fetchEnd;
-        }
-        updateViewRangeRefAndRedraw({ start: newStart, end: newEnd });
+        zoomAtX(xViewport, e.deltaY);
       };
 
       // Ctrl+wheel zoom also works on the main viewport area (below).
@@ -2822,38 +3934,10 @@ export function useChartRenderer({
         e.preventDefault();
         markInteraction();
 
-        const rect = container.getBoundingClientRect();
-        const xInChart = e.clientX - rect.left + container.scrollLeft;
+        const rect = stage.getBoundingClientRect();
+        const xInChart = e.clientX - rect.left;
         if (xInChart < margin.left || xInChart > margin.left + innerWidth) return;
-
-        const prev = viewRangeRef.current || { start: fetchStart, end: fetchEnd };
-        const prevStart = Number(prev?.start);
-        const prevEnd = Number(prev?.end);
-        const span = Math.max(1, prevEnd - prevStart);
-        const zoomFactor = Math.exp(e.deltaY * 0.0015);
-        const minSpan = 1000; // 1ms
-        const newSpan = clampNumber(span * zoomFactor, minSpan, fetchSpan);
-
-        const t = prevStart + ((xInChart - margin.left) / innerWidth) * span;
-        let newStart = t - (t - prevStart) * (newSpan / span);
-        let newEnd = newStart + newSpan;
-
-        if (newStart < fetchStart) {
-          newStart = fetchStart;
-          newEnd = newStart + newSpan;
-        }
-        if (newEnd > fetchEnd) {
-          newEnd = fetchEnd;
-          newStart = newEnd - newSpan;
-        }
-
-        newStart = clampNumber(newStart, fetchStart, fetchEnd);
-        newEnd = clampNumber(newEnd, fetchStart, fetchEnd);
-        if (newEnd <= newStart) {
-          newStart = fetchStart;
-          newEnd = fetchEnd;
-        }
-        updateViewRangeRefAndRedraw({ start: newStart, end: newEnd });
+        zoomAtX(xInChart, e.deltaY);
       };
 
       // Drag the minimap window to pan the view (client-side; no refetch)
@@ -2861,14 +3945,14 @@ export function useChartRenderer({
       let dragOffsetPx = 0;
 
       const panViewToLeftPx = (leftPx: number) => {
-        const current = viewRangeRef.current || { start: fetchStart, end: fetchEnd };
+        const current = getStoredViewRange();
         const spanUs = Math.max(1, Number(current.end) - Number(current.start));
-        const windowPx = (spanUs / fetchSpan) * innerWidth;
+        const windowPx = (spanUs / domainSpan) * innerWidth;
         const minLeft = margin.left;
         const maxLeft = Math.max(minLeft, margin.left + innerWidth - windowPx);
         const clampedLeft = clampNumber(leftPx, minLeft, maxLeft);
 
-        const newStart = fetchStart + ((clampedLeft - margin.left) / innerWidth) * fetchSpan;
+        const newStart = domainStart + ((clampedLeft - margin.left) / innerWidth) * domainSpan;
         const newEnd = newStart + spanUs;
         updateViewRangeRefAndRedraw({ start: newStart, end: newEnd });
       };
@@ -2880,8 +3964,8 @@ export function useChartRenderer({
 
         const p = getViewParams();
         const spanUs = p.span;
-        const windowPx = (spanUs / fetchSpan) * innerWidth;
-        const currentLeft = margin.left + ((p.vs - fetchStart) / fetchSpan) * innerWidth;
+        const windowPx = (spanUs / domainSpan) * innerWidth;
+        const currentLeft = margin.left + ((p.vs - domainStart) / domainSpan) * innerWidth;
 
         if (e.target === minimapWindowEl) {
           dragOffsetPx = x - currentLeft;
@@ -2911,45 +3995,52 @@ export function useChartRenderer({
       // Drag the main chart to pan horizontally when zoomed in.
       let isDraggingChart = false;
       let dragStartClientX = 0;
+      let dragStartChartX = 0;
       let dragStartView: ViewRange | null = null;
+      let dragStartParams: ViewParams | null = null;
       let dragMoved = false;
 
       const canPanChart = () => {
-        const current = viewRangeRef.current || { start: fetchStart, end: fetchEnd };
-        return Math.max(1, Number(current.end) - Number(current.start)) < fetchSpan;
+        const current = getStoredViewRange();
+        return Math.max(1, Number(current.end) - Number(current.start)) < domainSpan;
       };
 
       const handleChartPointerDown = (e: PointerEvent) => {
         if (e.button !== 0) return;
         if (e.pointerType && e.pointerType !== 'mouse') return;
         if (!canPanChart()) return;
-        const rect = container.getBoundingClientRect();
+        const rect = stage.getBoundingClientRect();
         const xViewport = e.clientX - rect.left;
         if (xViewport < margin.left || xViewport > margin.left + innerWidth) return;
 
         isDraggingChart = true;
         dragMoved = false;
         dragStartClientX = e.clientX;
-        const current = viewRangeRef.current || { start: fetchStart, end: fetchEnd };
+        dragStartChartX = xViewport;
+        const current = getStoredViewRange();
         dragStartView = { start: Number(current.start), end: Number(current.end) };
-        container.setPointerCapture(e.pointerId);
+        dragStartParams = getViewParams();
+        stage.setPointerCapture(e.pointerId);
       };
 
       const handleChartPointerMove = (e: PointerEvent) => {
-        if (!isDraggingChart || !dragStartView) return;
+        if (!isDraggingChart || !dragStartView || !dragStartParams) return;
         const dx = e.clientX - dragStartClientX;
-        if (Math.abs(dx) > 2) dragMoved = true;
+        if (Math.abs(dx) > 5) dragMoved = true;
         const span = Math.max(1, dragStartView.end - dragStartView.start);
-        const p = getViewParams();
-        const deltaUs = dx / p.k;
-        let newStart = dragStartView.start - deltaUs;
+        const rect = stage.getBoundingClientRect();
+        const currentX = e.clientX - rect.left;
+        const startDomain = tOf(dragStartChartX, dragStartParams);
+        const currentDomain = tOf(currentX, dragStartParams);
+        const deltaUs = startDomain - currentDomain;
+        let newStart = dragStartView.start + deltaUs;
         let newEnd = newStart + span;
-        if (newStart < fetchStart) {
-          newStart = fetchStart;
+        if (newStart < domainStart) {
+          newStart = domainStart;
           newEnd = newStart + span;
         }
-        if (newEnd > fetchEnd) {
-          newEnd = fetchEnd;
+        if (newEnd > domainEnd) {
+          newEnd = domainEnd;
           newStart = newEnd - span;
         }
         markInteraction();
@@ -2962,6 +4053,7 @@ export function useChartRenderer({
         }
         isDraggingChart = false;
         dragStartView = null;
+        dragStartParams = null;
         syncViewRangeToState();
       };
 
@@ -2973,16 +4065,37 @@ export function useChartRenderer({
           redrawForScroll();
         });
       };
+      const handleAxisMouseMove = (e: MouseEvent) => {
+        if (!axisHost) return;
+        const rect = axisHost.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        if (setTrackedFisheyeFocus(x)) {
+          redraw();
+        }
+      };
+      const handleAxisMouseLeave = (e: MouseEvent) => {
+        const related = e.relatedTarget;
+        if (related instanceof Node && stage.contains(related)) {
+          return;
+        }
+        if (clearTrackedFisheyeFocus()) {
+          redraw();
+        }
+      };
       container.addEventListener('scroll', handleScroll);
-      container.addEventListener('mousemove', handleMouseMove);
-      container.addEventListener('mouseleave', handleMouseLeave);
-      container.addEventListener('click', handleClick);
-      container.addEventListener('pointerdown', handleChartPointerDown);
-      container.addEventListener('pointermove', handleChartPointerMove);
-      container.addEventListener('pointerup', handleChartPointerUp);
-      container.addEventListener('pointercancel', handleChartPointerUp);
-      container.addEventListener('wheel', handleViewportWheel, { passive: false });
-      if (axisHost) axisHost.addEventListener('wheel', handleAxisWheel, { passive: false });
+      stage.addEventListener('mousemove', handleMouseMove);
+      stage.addEventListener('mouseleave', handleMouseLeave);
+      stage.addEventListener('click', handleClick);
+      stage.addEventListener('pointerdown', handleChartPointerDown);
+      stage.addEventListener('pointermove', handleChartPointerMove);
+      stage.addEventListener('pointerup', handleChartPointerUp);
+      stage.addEventListener('pointercancel', handleChartPointerUp);
+      stage.addEventListener('wheel', handleViewportWheel, { passive: false });
+      if (axisHost) {
+        axisHost.addEventListener('wheel', handleAxisWheel, { passive: false });
+        axisHost.addEventListener('mousemove', handleAxisMouseMove);
+        axisHost.addEventListener('mouseleave', handleAxisMouseLeave);
+      }
       if (yAxisHost) yAxisHost.addEventListener('click', handleAxisClick);
       if (minimapHost) {
         minimapHost.style.touchAction = 'none';
@@ -2992,7 +4105,7 @@ export function useChartRenderer({
         minimapHost.addEventListener('pointercancel', handleMinimapPointerUp);
       }
 
-      return () => {
+      const cleanup = () => {
         if (hoverFrame) {
           cancelAnimationFrame(hoverFrame);
           hoverFrame = 0;
@@ -3006,15 +4119,19 @@ export function useChartRenderer({
           scrollRaf = 0;
         }
         container.removeEventListener('scroll', handleScroll);
-        container.removeEventListener('mousemove', handleMouseMove);
-        container.removeEventListener('mouseleave', handleMouseLeave);
-        container.removeEventListener('click', handleClick);
-        container.removeEventListener('pointerdown', handleChartPointerDown);
-        container.removeEventListener('pointermove', handleChartPointerMove);
-        container.removeEventListener('pointerup', handleChartPointerUp);
-        container.removeEventListener('pointercancel', handleChartPointerUp);
-        container.removeEventListener('wheel', handleViewportWheel);
-        if (axisHost) axisHost.removeEventListener('wheel', handleAxisWheel);
+        stage.removeEventListener('mousemove', handleMouseMove);
+        stage.removeEventListener('mouseleave', handleMouseLeave);
+        stage.removeEventListener('click', handleClick);
+        stage.removeEventListener('pointerdown', handleChartPointerDown);
+        stage.removeEventListener('pointermove', handleChartPointerMove);
+        stage.removeEventListener('pointerup', handleChartPointerUp);
+        stage.removeEventListener('pointercancel', handleChartPointerUp);
+        stage.removeEventListener('wheel', handleViewportWheel);
+        if (axisHost) {
+          axisHost.removeEventListener('wheel', handleAxisWheel);
+          axisHost.removeEventListener('mousemove', handleAxisMouseMove);
+          axisHost.removeEventListener('mouseleave', handleAxisMouseLeave);
+        }
         if (yAxisHost) yAxisHost.removeEventListener('click', handleAxisClick);
         if (minimapHost) {
           minimapHost.removeEventListener('pointerdown', handleMinimapPointerDown);
@@ -3035,13 +4152,16 @@ export function useChartRenderer({
           onResize = null;
         }
       };
+      chartTeardownRef.current = cleanup;
+      return cleanup;
     };
 
     let teardown: (() => void) | undefined;
     let onResize: (() => void) | null = null;
     let resizeRaf = 0;
     const build = () => {
-      if (teardown) teardown();
+      const hasExistingChart = !!stage.querySelector('.gantt-canvas');
+      if (teardown && !hasExistingChart) teardown();
       teardown = renderChart();
     };
 
@@ -3067,7 +4187,7 @@ export function useChartRenderer({
       }
       resizeObserver.disconnect();
       if (teardown) teardown();
-      container.innerHTML = '';
+      stage.innerHTML = '';
       if (minimapRef.current) minimapRef.current.innerHTML = '';
       if (xAxisRef.current) xAxisRef.current.innerHTML = '';
       if (yAxisRef.current) yAxisRef.current.innerHTML = '';
@@ -3076,12 +4196,14 @@ export function useChartRenderer({
 
   useGanttChart(renderChartEffect, [
     chartData,
+    dataMapping,
     startTime,
     endTime,
     bins,
     obd,
     processAggregates,
     threadsByHierarchy1,
+    hierarchyTrees,
     renderSoA,
     expandedHierarchy1Ids,
     yAxisWidth,
