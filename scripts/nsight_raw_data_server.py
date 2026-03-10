@@ -14,6 +14,7 @@ New: manual upload workflow
 
 import argparse
 import cgi
+import gzip
 import json
 import os
 import re
@@ -382,38 +383,97 @@ def load_raw_events_pfw(
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
 
-    # First pass: line-based parsing (handles .pfw format used in this repo)
-    parsed_events: List[Dict[str, Any]] = []
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            raw = line.strip()
-            if not raw or raw == "[" or raw == "]":
-                continue
-            if raw.endswith(","):
-                raw = raw[:-1]
-            try:
-                obj = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(obj, dict):
-                parsed_events.append(obj)
-            elif isinstance(obj, list):
-                for item in obj:
-                    if isinstance(item, dict):
-                        parsed_events.append(item)
+    def collect_event_dicts(obj: Any) -> List[Dict[str, Any]]:
+        if isinstance(obj, list):
+            return [item for item in obj if isinstance(item, dict)]
+        if isinstance(obj, dict):
+            # Common wrapped schemas: {"traceEvents":[...]}, {"events":[...]}, {"data":[...]}
+            for key in ("traceEvents", "events", "data"):
+                nested = obj.get(key)
+                if isinstance(nested, list):
+                    return [item for item in nested if isinstance(item, dict)]
+            return [obj]
+        return []
 
-    # Fallback: full-file JSON parsing (for true JSON arrays)
-    if not parsed_events:
+    def parse_json_stream(text: str) -> List[Dict[str, Any]]:
+        # Robust fallback: scan for JSON values in a noisy text stream.
+        decoder = json.JSONDecoder()
+        out: List[Dict[str, Any]] = []
+        i = 0
+        n = len(text)
+        while i < n:
+            ch = text[i]
+            if ch.isspace() or ch in ",[]":
+                i += 1
+                continue
+            try:
+                obj, j = decoder.raw_decode(text, i)
+            except json.JSONDecodeError:
+                i += 1
+                continue
+            out.extend(collect_event_dicts(obj))
+            i = max(i + 1, j)
+        return out
+
+    encodings = ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be")
+    raw_bytes = path.read_bytes()
+    byte_candidates = [raw_bytes]
+    if raw_bytes.startswith(b"\x1f\x8b"):
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            obj = json.loads(text)
-            if isinstance(obj, list):
-                parsed_events = [e for e in obj if isinstance(e, dict)]
+            byte_candidates.append(gzip.decompress(raw_bytes))
         except Exception:
             pass
 
+    # Parse with multiple decoding strategies and tolerant JSON extraction.
+    parsed_events: List[Dict[str, Any]] = []
+    for blob in byte_candidates:
+        if parsed_events:
+            break
+        for enc in encodings:
+            try:
+                text = blob.decode(enc, errors="replace").replace("\x00", "")
+            except Exception:
+                continue
+            if not text.strip():
+                continue
+
+            # 1) Parse as a full JSON document.
+            try:
+                obj = json.loads(text)
+                events = collect_event_dicts(obj)
+                if events:
+                    parsed_events = events
+                    break
+            except Exception:
+                pass
+
+            # 2) Parse line-by-line (classic .pfw / jsonl).
+            local_events: List[Dict[str, Any]] = []
+            for line in text.splitlines():
+                raw = line.strip()
+                if not raw or raw == "[" or raw == "]":
+                    continue
+                if raw.endswith(","):
+                    raw = raw[:-1]
+                try:
+                    obj = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                local_events.extend(collect_event_dicts(obj))
+            if local_events:
+                parsed_events = local_events
+                break
+
+            # 3) Token-stream parse for non-standard wrappers/noise.
+            stream_events = parse_json_stream(text)
+            if stream_events:
+                parsed_events = stream_events
+                break
+
     if not parsed_events:
-        raise ValueError("No events found in uploaded trace (expected JSON array or JSON lines).")
+        raise ValueError(
+            "No events found in uploaded trace (expected JSON array / JSON lines / wrapped traceEvents)."
+        )
 
     # Infer columns from a small sample (keys can vary)
     sample_keys: set = set()

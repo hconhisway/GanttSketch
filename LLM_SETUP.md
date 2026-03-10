@@ -40,10 +40,12 @@ The application supports multiple LLM providers:
 
 ### 3. Set Up Environment Variables
 
-Create a `.env` file in the root directory of your project:
+**Production / deployed site:** Do **not** set `REACT_APP_LLM_API_KEY` in the build environment. Any `REACT_APP_*` value is embedded in the frontend JavaScript and can be seen by every visitor. Use the **Server (proxy)** instead: run `npm run llm:server` on the server with `OPENAI_API_KEY` set, and point nginx at `/api/llm/` (see [DEPLOY.md](./DEPLOY.md)).
+
+**Local development:** Create a `.env` file if you want a default key or provider (optional; the app defaults to Server (proxy)).
 
 ```bash
-# For OpenAI
+# For OpenAI (local dev or in-app BYOK)
 REACT_APP_LLM_API_KEY=sk-your-actual-openai-api-key-here
 REACT_APP_LLM_PROVIDER=openai
 REACT_APP_LLM_MODEL=gpt-4
@@ -219,9 +221,9 @@ To reduce API costs:
 
 ### Security Best Practices
 
-1. **Never commit your `.env` file** - Add it to `.gitignore`
-2. **Use environment variables** - Don't hardcode API keys
-3. **Rotate keys regularly** - Generate new API keys periodically
+1. **Production: use Server (proxy)** - Keep the API key in server env (`OPENAI_API_KEY`), not in `REACT_APP_*`. Never set `REACT_APP_LLM_API_KEY` when running `npm run build` for production.
+2. **Never commit your `.env` file** - Add it to `.gitignore`
+3. **Rotate keys if leaked** - If a key was ever built into a deployed frontend, revoke it and create a new one
 4. **Set usage limits** - Configure spending limits in your API dashboard
 5. **Monitor usage** - Regularly check your API usage and costs
 

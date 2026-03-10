@@ -158,34 +158,13 @@ const API_URL = 'http://127.0.0.1:8080/get-data-in-range';
 
 ### LLM Chat Assistant Configuration
 
-To enable the AI chat assistant, you need to configure an LLM provider:
+**Default: Server (proxy)** — The app uses a server-side LLM proxy by default. The API key stays in server environment variables (`OPENAI_API_KEY`); the frontend never sees it. Deploy the proxy with `npm run llm:server` and nginx to `/api/llm/` (see [DEPLOY.md](./DEPLOY.md)).
 
-1. **Copy the example environment file:**
+**BYOK (bring your own key):** In the app, open **API Configuration** and switch the provider to OpenAI/Anthropic/etc., then enter your own API key. Settings are stored per session in the browser.
 
-   ```bash
-   cp env.example .env
-   ```
+**Important:** Do **not** put API keys in `REACT_APP_*` environment variables for any **production** build. Those values are baked into the frontend bundle and are visible to anyone who visits the site. Use the Server (proxy) for production, or let users enter their own key in the UI.
 
-2. **Add your API key to `.env`:**
-
-   ```bash
-   # For OpenAI
-   REACT_APP_LLM_API_KEY=sk-your-openai-api-key-here
-
-   # For Anthropic
-   REACT_APP_LLM_API_KEY=sk-ant-your-anthropic-key-here
-
-   # For Ollama (local) - no key needed
-   REACT_APP_LLM_API_KEY=
-   ```
-
-3. **Configure the provider in `src/llmConfig.ts`:**
-   - Set your preferred `apiEndpoint`
-   - Choose your `model`
-   - Adjust `temperature`, `maxTokens`, and other parameters
-   - Customize the `systemPrompt` for your use case
-
-For detailed setup instructions, see [LLM_SETUP.md](./LLM_SETUP.md).
+For local development with a built-in key, copy `env.example` to `.env` and set `REACT_APP_LLM_PROVIDER=openai` and `REACT_APP_LLM_API_KEY=...` (optional; only for dev). For detailed setup, see [LLM_SETUP.md](./LLM_SETUP.md).
 
 ## Installation
 
@@ -382,10 +361,9 @@ For detailed examples and capabilities, see [LLM_TRACKS_CONFIG.md](./LLM_TRACKS_
 
 ⚠️ **Important**: Never commit your `.env` file or expose your API keys!
 
-- The `.env` file contains sensitive API keys
+- **Production:** Use the **Server (proxy)** so the API key lives only in server env (e.g. `OPENAI_API_KEY`). Do not set `REACT_APP_LLM_API_KEY` when building for production — it gets embedded in the frontend and is visible to all visitors.
 - Add `.env` to your `.gitignore`
-- Use environment variables for all sensitive data
-- Rotate API keys regularly
+- Rotate keys if they were ever built into a deployed frontend
 - Set usage limits in your API provider dashboard
 
 ## Contributing

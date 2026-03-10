@@ -10,7 +10,7 @@ const HASH_PREFIX = '#!/viewer';
 const SESSION_PARAM = 'session';
 
 export interface SessionLLMConfig {
-  provider?: 'openai' | 'anthropic' | 'ollama' | 'deepseek' | 'zhipu' | 'qwen' | 'custom';
+  provider?: 'proxy' | 'openai' | 'anthropic' | 'ollama' | 'deepseek' | 'zhipu' | 'qwen' | 'custom';
   apiKey?: string;
   apiEndpoint?: string;
   model?: string;

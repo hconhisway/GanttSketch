@@ -18,8 +18,9 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "build": "NODE_ENV=production node scripts/checkNoSecretInProduction.js && react-scripts build",
     "export:server": "node tools/exportServer.js",
+    "llm:server": "node tools/llmProxyServer.js",
     "test": "react-scripts test",
     "test:perf": "playwright test",
     "eject": "react-scripts eject"

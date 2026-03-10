@@ -8,40 +8,36 @@ Your OSFAT application now has an **AI-powered chat assistant** on the right sid
 
 ### Step 1: Choose Your LLM Provider
 
-Pick one of these options:
+**Default: Server (proxy)** — No setup needed if the site is deployed with the LLM proxy (see [DEPLOY.md](./DEPLOY.md)). The app uses the server’s key; you never enter it in the browser.
 
-#### Option A: OpenAI (Recommended for beginners)
+**Or use your own key (BYOK):** In the app, open **API Configuration**, switch provider to OpenAI/Anthropic/etc., and enter your API key.
+
+**Local dev with a built-in key (optional):**
+
+#### Option A: OpenAI
 
 ```bash
 # 1. Get API key from https://platform.openai.com/api-keys
-# 2. Create .env file:
+# 2. Create .env file (local dev only; do NOT use for production build):
 echo "REACT_APP_LLM_API_KEY=sk-your-openai-key-here" > .env
+echo "REACT_APP_LLM_PROVIDER=openai" >> .env
 ```
 
 #### Option B: Anthropic Claude
 
 ```bash
-# 1. Get API key from https://console.anthropic.com/
-# 2. Create .env file:
-echo "REACT_APP_LLM_API_KEY=sk-ant-your-anthropic-key" > .env
-# 3. Edit src/llmConfig.ts and change:
-#    - apiEndpoint to 'https://api.anthropic.com/v1/messages'
-#    - provider.name to 'anthropic'
-#    - model to 'claude-3-sonnet-20240229'
+# Create .env and set provider in app or .env (local dev only)
+echo "REACT_APP_LLM_PROVIDER=anthropic" > .env
+# Then in app: API Configuration → Anthropic, enter your key
 ```
 
 #### Option C: Ollama (Local, Free, No API Key!)
 
 ```bash
 # 1. Install Ollama from https://ollama.ai/
-# 2. Pull a model:
-ollama pull llama2
-# 3. Start Ollama:
-ollama serve
-# 4. Edit src/llmConfig.ts and change:
-#    - apiEndpoint to 'http://localhost:11434/api/chat'
-#    - provider.name to 'ollama'
-#    - model to 'llama2'
+# 2. Pull a model: ollama pull llama2
+# 3. Start Ollama: ollama serve
+# 4. In app: API Configuration → Ollama (no key needed)
 ```
 
 ### Step 2: Start the App

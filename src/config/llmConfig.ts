@@ -3,6 +3,7 @@
 // Supports runtime overrides via setLLMConfig (e.g. from API Config modal / session restore).
 
 export type LLMProviderName =
+  | 'proxy'
   | 'openai'
   | 'anthropic'
   | 'ollama'
@@ -47,7 +48,7 @@ const parseNumber = (value: string | undefined, fallback: number) => {
   return Number.isFinite(num) ? num : fallback;
 };
 
-const providerName = (env.REACT_APP_LLM_PROVIDER || 'openai') as LLMProviderName;
+const providerName = (env.REACT_APP_LLM_PROVIDER || 'proxy') as LLMProviderName;
 const defaultOllamaEndpoint = 'http://localhost:11434/api/chat';
 const defaultAnthropicEndpoint = 'https://api.anthropic.com/v1/messages';
 const defaultOpenAIEndpoint = 'https://api.openai.com/v1/responses';
@@ -55,8 +56,12 @@ const defaultDeepSeekEndpoint = 'https://api.deepseek.com/v1/chat/completions';
 const defaultZhipuEndpoint = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
 const defaultQwenEndpoint = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 
+/** Proxy uses same-origin /api/llm/v1/responses so the server adds the API key. */
+const defaultProxyEndpoint = '/api/llm/v1/responses';
+
 export function getDefaultEndpoint(provider: LLMProviderName): string {
   const map: Record<LLMProviderName, string> = {
+    proxy: defaultProxyEndpoint,
     openai: defaultOpenAIEndpoint,
     anthropic: defaultAnthropicEndpoint,
     ollama: defaultOllamaEndpoint,
@@ -70,6 +75,7 @@ export function getDefaultEndpoint(provider: LLMProviderName): string {
 
 export function getDefaultModel(provider: LLMProviderName): string {
   const map: Record<LLMProviderName, string> = {
+    proxy: 'gpt-5.2-codex',
     openai: 'gpt-5.2-codex',
     anthropic: 'claude-3-opus-20240229',
     ollama: env.REACT_APP_LLM_OLLAMA_MODEL || 'llama2',
@@ -87,7 +93,7 @@ function buildDefaultConfig(): LLMConfigType {
 
   return {
     apiEndpoint,
-    apiKey: env.REACT_APP_LLM_API_KEY || '',
+    apiKey: providerName === 'proxy' ? '' : (env.REACT_APP_LLM_API_KEY || ''),
     model,
     stream: parseBool(env.REACT_APP_LLM_STREAM, true),
     timeout: parseNumber(env.REACT_APP_LLM_TIMEOUT, 60000),
@@ -151,8 +157,10 @@ function buildResponsesApiBody(
     }
   }
 
+  const model =
+    cfg.model?.trim() || (cfg.provider.name === 'proxy' ? getDefaultModel('proxy') : 'gpt-4o');
   const body: Record<string, unknown> = {
-    model: cfg.model,
+    model,
     input: inputMessages,
     store: false
   };
@@ -256,7 +264,8 @@ export async function verifyLLMConnection(overrides?: {
     useMaxCompletionParam: overrides?.useMaxCompletionParam ?? cfg.useMaxCompletionParam
   };
 
-  if (!key?.trim()) {
+  const isProxy = provider === 'proxy';
+  if (!isProxy && !key?.trim()) {
     return { ok: false, error: 'API key is required' };
   }
   if (!endpoint?.trim()) {
@@ -264,14 +273,14 @@ export async function verifyLLMConnection(overrides?: {
   }
 
   try {
-    const headers: Record<string, string> = {
-      ...cfg.headers,
-      Authorization: `Bearer ${key}`
-    };
-    if (provider === 'anthropic') {
-      headers['x-api-key'] = key;
-      headers['anthropic-version'] = cfg.provider.anthropic.version;
-      delete headers['Authorization'];
+    const headers: Record<string, string> = { ...cfg.headers };
+    if (!isProxy) {
+      headers['Authorization'] = `Bearer ${key}`;
+      if (provider === 'anthropic') {
+        headers['x-api-key'] = key!;
+        headers['anthropic-version'] = cfg.provider.anthropic.version;
+        delete headers['Authorization'];
+      }
     }
 
     const useResponses = isResponsesApi(endpoint);
@@ -347,20 +356,19 @@ export async function streamLLMResponse(
       ? buildResponsesApiBody(cfg, messages, true)
       : buildChatCompletionsBody(cfg, messages, true);
 
-    const headers: Record<string, string> = {
-      ...cfg.headers,
-      Authorization: `Bearer ${cfg.apiKey}`
-    };
-
-    if (cfg.provider.name === 'anthropic') {
-      headers['x-api-key'] = cfg.apiKey;
-      headers['anthropic-version'] = cfg.provider.anthropic.version;
-      delete headers['Authorization'];
+    const headers: Record<string, string> = { ...cfg.headers };
+    if (cfg.provider.name !== 'proxy') {
+      headers['Authorization'] = `Bearer ${cfg.apiKey}`;
+      if (cfg.provider.name === 'anthropic') {
+        headers['x-api-key'] = cfg.apiKey;
+        headers['anthropic-version'] = cfg.provider.anthropic.version;
+        delete headers['Authorization'];
+      }
     }
 
     const response = await fetch(cfg.apiEndpoint, {
       method: 'POST',
-      headers: headers,
+      headers,
       body: JSON.stringify(requestBody),
       signal: controller.signal
     });
@@ -452,20 +460,19 @@ export async function sendLLMRequest(messages: ChatMessage[]) {
     ? buildResponsesApiBody(cfg, messages, false)
     : buildChatCompletionsBody(cfg, messages, false);
 
-  const headers: Record<string, string> = {
-    ...cfg.headers,
-    Authorization: `Bearer ${cfg.apiKey}`
-  };
-
-  if (cfg.provider.name === 'anthropic') {
-    headers['x-api-key'] = cfg.apiKey;
-    headers['anthropic-version'] = cfg.provider.anthropic.version;
-    delete headers['Authorization'];
+  const headers: Record<string, string> = { ...cfg.headers };
+  if (cfg.provider.name !== 'proxy') {
+    headers['Authorization'] = `Bearer ${cfg.apiKey}`;
+    if (cfg.provider.name === 'anthropic') {
+      headers['x-api-key'] = cfg.apiKey;
+      headers['anthropic-version'] = cfg.provider.anthropic.version;
+      delete headers['Authorization'];
+    }
   }
 
   const response = await fetch(cfg.apiEndpoint, {
     method: 'POST',
-    headers: headers,
+    headers,
     body: JSON.stringify(requestBody)
   });
 
@@ -507,4 +514,5 @@ export async function sendLLMRequest(messages: ChatMessage[]) {
 }
 
 // Legacy export for consumers that expect a default LLMConfig object
-export default { getLLMConfig, setLLMConfig, resetLLMConfigToDefaults };
+const llmConfigDefault = { getLLMConfig, setLLMConfig, resetLLMConfigToDefaults };
+export default llmConfigDefault;

@@ -10,6 +10,7 @@ import {
 } from '../../config/llmConfig';
 
 const PROVIDERS = [
+  { value: 'proxy', label: 'Server (proxy)' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'ollama', label: 'Ollama' },
@@ -33,7 +34,7 @@ export const ApiConfigModal = React.memo(function ApiConfigModal({
   onClose,
   onSave
 }: ApiConfigModalProps) {
-  const [provider, setProvider] = useState<string>('openai');
+  const [provider, setProvider] = useState<string>('proxy');
   const [apiKey, setApiKey] = useState('');
   const [apiEndpoint, setApiEndpoint] = useState('');
   const [model, setModel] = useState('');
@@ -75,7 +76,9 @@ export const ApiConfigModal = React.memo(function ApiConfigModal({
       maxTokens: validMaxTokens,
       useMaxCompletionParam
     };
-    if (apiKey !== API_KEY_MASKED && apiKey.trim()) {
+    if (provider === 'proxy') {
+      update.apiKey = '';
+    } else if (apiKey !== API_KEY_MASKED && apiKey.trim()) {
       update.apiKey = apiKey.trim();
     }
     setLLMConfig(update as any);
@@ -143,19 +146,26 @@ export const ApiConfigModal = React.memo(function ApiConfigModal({
           </select>
         </div>
 
-        <div className="api-config-field">
-          <label htmlFor="api-config-key">API Key</label>
-          <input
-            id="api-config-key"
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-... or enter new key"
-            className="api-config-input"
-            autoComplete="off"
-          />
-          <p className="api-config-key-hint">Full key is never shown. Enter new key to replace.</p>
-        </div>
+        {provider !== 'proxy' && (
+          <div className="api-config-field">
+            <label htmlFor="api-config-key">API Key</label>
+            <input
+              id="api-config-key"
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="sk-... or enter new key"
+              className="api-config-input"
+              autoComplete="off"
+            />
+            <p className="api-config-key-hint">Full key is never shown. Enter new key to replace.</p>
+          </div>
+        )}
+        {provider === 'proxy' && (
+          <p className="api-config-key-hint">
+            Using server-hosted key (not visible in browser). Switch to another provider and enter your own key for BYOK.
+          </p>
+        )}
 
         <div className="api-config-field">
           <label htmlFor="api-config-endpoint">API Endpoint</label>
@@ -242,7 +252,11 @@ export const ApiConfigModal = React.memo(function ApiConfigModal({
             type="button"
             className="api-config-verify-btn"
             onClick={handleVerify}
-            disabled={isVerifying || !apiEndpoint?.trim() || (apiKey !== API_KEY_MASKED && !apiKey.trim())}
+            disabled={
+              isVerifying ||
+              !apiEndpoint?.trim() ||
+              (provider !== 'proxy' && apiKey !== API_KEY_MASKED && !apiKey.trim())
+            }
             title="Verify API key and endpoint"
           >
             {isVerifying ? 'Verifying...' : 'Verify API'}

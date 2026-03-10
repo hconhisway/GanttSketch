@@ -2,6 +2,13 @@
 
 ---
 
+## 若 LLM API key 曾泄露：立即操作
+
+1. **在 OpenAI 控制台立刻 revoke/rotate 已泄露的 key**，并检查 usage / 设置 spending limits，否则泄露的 key 仍可被滥用。
+2. **线上禁止用 `npm start` 对外服务**。必须使用 `npm run build` 后由 nginx 提供 `build/` 静态文件；否则开发构建会把环境变量打进前端，且会暴露 WebSocket/HMR。
+
+---
+
 ## Nginx 正确转发：详细步骤（按顺序做）
 
 ### 步骤 1：确认 nginx 已安装并找到配置文件位置
@@ -145,6 +152,43 @@ location / {
     }
 ```
 
+**5.3 LLM 代理（Server Proxy）：/api/llm/ → 8091**
+
+用于保护 LLM API key：key 只存在服务器环境变量中，前端请求 `/api/llm/` 时不带 key，由本机 8091 服务加上 key 后转发到 OpenAI。SSE 流式响应需关闭缓冲并加长超时。公网部署建议对 `/api/llm/` 做限流（按 IP），避免被刷额度。
+
+在 **http** 块中（如 `/etc/nginx/nginx.conf` 的 `http { ... }` 内）添加限流 zone（与其它 server 共用一次即可）：
+
+```nginx
+    limit_req_zone $binary_remote_addr zone=llm:10m rate=2r/s;
+```
+
+在 **同一 server 块**内添加：
+
+```nginx
+    location /api/llm/ {
+        limit_req zone=llm burst=5 nodelay;
+        proxy_pass http://127.0.0.1:8091;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 300s;
+    }
+```
+
+服务器上需运行 LLM 代理并配置 key，例如：
+
+```bash
+export OPENAI_API_KEY=sk-your-key-here
+npm run llm:server
+```
+
+或用 systemd 常驻，并设置 `Environment=OPENAI_API_KEY=...`。本机可用 `curl -s http://127.0.0.1:8091/health` 验证。
+
 **整体结构示例**（只做参考，重点是上面两个 `location` 和 `root` 在同一 `server` 里）：
 
 ```nginx
@@ -207,6 +251,20 @@ server {
         proxy_read_timeout 600s;
         proxy_connect_timeout 10s;
         proxy_send_timeout 600s;
+    }
+
+    location /api/llm/ {
+        limit_req zone=llm burst=5 nodelay;
+        proxy_pass http://127.0.0.1:8091;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 300s;
     }
 
     # 你原有的 ssl_certificate、ssl_certificate_key 等保持不变
